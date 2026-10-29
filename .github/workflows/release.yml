@@ -44,6 +44,7 @@ jobs:
           umask 077
           printf '%s' "$TOKOPAD_KEYSTORE_BASE64" | base64 --decode > "$TOKOPAD_KEYSTORE_PATH"
           gradle --no-daemon lintRelease testReleaseUnitTest assembleRelease bundleRelease
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs app/build/outputs/apk/release/app-release.apk
       - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         with:
           name: tokopad-signed-release

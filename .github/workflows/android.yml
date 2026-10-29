@@ -30,9 +30,33 @@ jobs:
       - uses: gradle/actions/setup-gradle@0723195856401067f7a2779048b490ace7a47d7c # v5
         with:
           gradle-version: '8.11.1'
-      - name: Lint, unit tests, debug APK, optimized unsigned release
-        run: gradle --no-daemon lintDebug testDebugUnitTest assembleDebug assembleRelease
+      - name: Lint and unit tests
+        run: gradle --no-daemon lintDebug testDebugUnitTest
+      - name: Build unsigned release for pull requests
+        if: github.event_name == 'pull_request'
+        run: gradle --no-daemon assembleRelease
+      - name: Build signed release
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        env:
+          TOKOPAD_KEYSTORE_BASE64: ${{ secrets.TOKOPAD_KEYSTORE_BASE64 }}
+          TOKOPAD_KEYSTORE_PASSWORD: ${{ secrets.TOKOPAD_KEYSTORE_PASSWORD }}
+          TOKOPAD_KEY_ALIAS: ${{ secrets.TOKOPAD_KEY_ALIAS }}
+          TOKOPAD_KEY_PASSWORD: ${{ secrets.TOKOPAD_KEY_PASSWORD }}
+          TOKOPAD_KEYSTORE_PATH: ${{ runner.temp }}/tokopad-release.jks
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$TOKOPAD_KEYSTORE_BASE64" || { echo 'Missing TOKOPAD_KEYSTORE_BASE64 secret'; exit 1; }
+          test -n "$TOKOPAD_KEYSTORE_PASSWORD" || { echo 'Missing TOKOPAD_KEYSTORE_PASSWORD secret'; exit 1; }
+          test -n "$TOKOPAD_KEY_ALIAS" || { echo 'Missing TOKOPAD_KEY_ALIAS secret'; exit 1; }
+          test -n "$TOKOPAD_KEY_PASSWORD" || { echo 'Missing TOKOPAD_KEY_PASSWORD secret'; exit 1; }
+          trap 'rm -f "$TOKOPAD_KEYSTORE_PATH"' EXIT
+          umask 077
+          printf '%s' "$TOKOPAD_KEYSTORE_BASE64" | base64 --decode > "$TOKOPAD_KEYSTORE_PATH"
+          gradle --no-daemon lintRelease testReleaseUnitTest assembleRelease
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs app/build/outputs/apk/release/app-release.apk
       - name: Enforce release APK size budget
+        if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
         shell: bash
         run: |
           set -euo pipefail
@@ -46,15 +70,9 @@ jobs:
           name: android-reports
           path: app/build/reports/
       - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         with:
-          name: tokopad-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
-          if-no-files-found: error
-      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
-        if: github.event_name != 'pull_request'
-        with:
-          name: tokopad-release-unsigned
+          name: tokopad-signed-release
           path: app/build/outputs/apk/release/*.apk
           if-no-files-found: error
   database-tests:
@@ -96,3 +114,51 @@ jobs:
         with:
           name: app-screenshots
           path: screenshots/
+  update-test:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+        with:
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
+          log-accepted-android-sdk-licenses: false
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: tokopad-signed-release
+          path: signed-release
+      - name: Download previous signed release when available
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          CURRENT_RUN_ID: ${{ github.run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api --method GET "repos/$GH_REPO/actions/artifacts" -f name=tokopad-signed-release -f per_page=100 > "$RUNNER_TEMP/artifacts.json"
+          artifact=$(jq -r --argjson current "$CURRENT_RUN_ID" '[.artifacts[] | select(.expired == false and .workflow_run.head_branch == "main" and .workflow_run.id < $current)] | sort_by(.id) | last | .id // empty' "$RUNNER_TEMP/artifacts.json")
+          mkdir previous-release
+          if [ -n "$artifact" ]; then
+            gh api "repos/$GH_REPO/actions/artifacts/$artifact/zip" > "$RUNNER_TEMP/previous-release.zip"
+            unzip -q "$RUNNER_TEMP/previous-release.zip" -d previous-release
+          else
+            echo 'First signed release: checking same-version reinstall; later runs check previous-to-current updates.' >> "$GITHUB_STEP_SUMMARY"
+            cp signed-release/app-release.apk previous-release/
+          fi
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2
+        with:
+          api-level: 35
+          arch: x86_64
+          disable-animations: true
+          script: bash .github/scripts/check-apk-update.sh

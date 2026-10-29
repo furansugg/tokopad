@@ -4,13 +4,15 @@ A small offline Android shop notebook: checkout, physical/digital products, cust
 
 ## Download
 
-Open [Android Actions](https://github.com/furansugg/tokopad/actions/workflows/android.yml), choose a successful main-branch run, download `tokopad-debug-apk`, unzip, install the APK on Android 8.0 or newer. Android may ask permission to install from your file manager.
+Open [Android Actions](https://github.com/furansugg/tokopad/actions/workflows/android.yml), choose a successful main-branch run, download `tokopad-signed-release`, unzip, install `app-release.apk` on Android 8.0 or newer. Android may ask permission to install from your file manager. Future releases use the same signing key and increasing version codes: install over the existing app without uninstalling; local data stays intact.
 
-Debug APKs are for evaluation. `tokopad-release-unsigned` contains the optimized release build but cannot be installed before signing. Do not distribute debug builds as production releases. Debug signing keys can change between CI runs: export a backup before reinstalling if Android rejects an update.
+Older `tokopad-debug-apk` builds used temporary signing keys. Switching from those builds to the signed release usually requires **one migration**: export a backup, save it outside the app, uninstall the old debug app, install the signed release, restore the backup. Do not uninstall before saving the backup; uninstall removes local data. An APK cannot bypass Android's certificate check, and the old private key cannot be recovered from an APK. Older `tokopad-release-unsigned` artifacts cannot be installed. Debug builds now stay in test jobs, not downloadable installation artifacts.
 
 ### Production signing
 
-The manual **Signed release** workflow builds an APK and AAB from `main`, using the `production` environment. Configure required reviewers for that environment, then add secrets `TOKOPAD_KEYSTORE_BASE64`, `TOKOPAD_KEYSTORE_PASSWORD`, `TOKOPAD_KEY_ALIAS`, and `TOKOPAD_KEY_PASSWORD`. The first is the base64 encoding of your existing production keystore. Keep a private, durable copy of that keystore: losing it can prevent future app updates. Never commit it. Signing files are decoded only on the GitHub runner and removed when the build step exits. No production key is generated or uploaded by this project setup.
+Main-branch CI requires repository secrets `TOKOPAD_KEYSTORE_BASE64`, `TOKOPAD_KEYSTORE_PASSWORD`, `TOKOPAD_KEY_ALIAS`, and `TOKOPAD_KEY_PASSWORD`; missing secrets fail the release rather than silently generating another identity. The first is the base64 encoding of the fixed production keystore. Keep a private, durable copy of the keystore and passwords: losing the key can prevent future updates. Never commit them or rotate the key for routine releases. Signing files are decoded only on the GitHub runner and removed when the build step exits. Pull requests build unsigned releases without signing secrets.
+
+The manual **Signed release** workflow additionally builds an AAB, using the `production` environment. Configure required reviewers if desired; any environment signing secrets must match the repository key, not introduce a different identity. CI verifies APK signatures and tests installation over the previous signed main-branch artifact on an emulator, checking the app UID, private file, and database survive. The first signed build checks same-version reinstall because no signed predecessor exists. Expired artifacts also fall back to same-version reinstall, explicitly noted in the run summary.
 
 ## Use
 
