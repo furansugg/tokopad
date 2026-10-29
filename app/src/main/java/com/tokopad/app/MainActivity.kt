@@ -223,7 +223,7 @@ private fun Tokopad() {
         dismissButton = { if (screen == "settings") TextButton(onClick = { context.startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS)); error = null }) { Text("Bluetooth") } }) }
     discardTarget?.let { target -> AlertDialog(onDismissRequest = { discardTarget = null }, title = { Text(l(lang, "Discard this cart?", "Buang keranjang ini?")) },
         text = { Text(l(lang, "Unsaved items will be lost.", "Item yang belum disimpan akan hilang.")) },
-        confirmButton = { TextButton(onClick = { cart = emptyList(); screen = target; discardTarget = null }) { Text(l(lang, "Discard", "Buang")) } },
+        confirmButton = { TextButton(onClick = { cart = emptyList(); checkoutId = java.util.UUID.randomUUID().toString(); screen = target; discardTarget = null }) { Text(l(lang, "Discard", "Buang")) } },
         dismissButton = { TextButton(onClick = { discardTarget = null }) { Text(l(lang, "Keep", "Kembali")) } }) }
     backupWarning?.let { action -> AlertDialog(onDismissRequest = { backupWarning = null },
         title = { Text(l(lang, "Sensitive backup", "Cadangan berisi data sensitif")) },
@@ -235,7 +235,7 @@ private fun Tokopad() {
         }) { Text(l(lang, "Save backup", "Simpan cadangan")) } }, dismissButton = { TextButton(onClick = { backupWarning = null }) { Text(l(lang, "Cancel", "Batal")) } }) }
     restoreText?.let { text -> AlertDialog(onDismissRequest = { restoreText = null }, title = { Text(l(lang, "Replace all data?", "Ganti semua data?")) },
         text = { Text(l(lang, "Current products, customers, transactions and settings will be replaced. Invalid backups are rejected before changing any data.", "Produk, pelanggan, transaksi, dan pengaturan saat ini akan diganti. Cadangan tidak valid ditolak sebelum data diubah.")) },
-        confirmButton = { TextButton(enabled = !busy, onClick = { restoreText = null; runTask { withContext(Dispatchers.IO) { store.restoreBackup(text) }; cart = emptyList(); selectedSale = null; query = ""; refresh(); snackbar.showSnackbar(l(settings.language, "Backup restored.", "Cadangan dipulihkan.")) } }) { Text(l(lang, "Replace data", "Ganti data")) } },
+        confirmButton = { TextButton(enabled = !busy, onClick = { restoreText = null; runTask { withContext(Dispatchers.IO) { store.restoreBackup(text) }; cart = emptyList(); checkoutId = java.util.UUID.randomUUID().toString(); selectedSale = null; query = ""; refresh(); snackbar.showSnackbar(l(settings.language, "Backup restored.", "Cadangan dipulihkan.")) } }) { Text(l(lang, "Replace data", "Ganti data")) } },
         dismissButton = { TextButton(onClick = { restoreText = null }) { Text(l(lang, "Cancel", "Batal")) } }) }
     customerHistory?.let { (customer, history) -> AlertDialog(onDismissRequest = { customerHistory = null }, title = { Text(customer.name) },
         text = { Column(Modifier.heightIn(max = 450.dp).verticalScroll(rememberScrollState())) {
@@ -263,6 +263,8 @@ internal fun operationError(error: Exception, language: String): String {
         message.contains("inactive", true) -> "Produk sudah nonaktif. Hapus dari keranjang."
         message.contains("no longer exists") -> "Produk atau pelanggan sudah tidak tersedia. Muat ulang data."
         message.contains("already cancelled") -> "Transaksi ini sudah dibatalkan. Stok tidak dikembalikan lagi."
+        message.contains("Checkout request already") -> "Permintaan kasir ini sudah dipakai. Keluar dari kasir, buang keranjang, lalu mulai penjualan baru."
+        message.contains("Local data limit") -> "Batas data lokal tercapai. Ekspor cadangan sebelum memulai dataset toko yang baru. Data lama tetap aman."
         message.contains("Bluetooth permission") -> "Izin Bluetooth diperlukan. Cari printer di Pengaturan untuk memberi izin."
         message.contains("Bluetooth is turned off") -> "Bluetooth mati. Aktifkan di pengaturan Android."
         message.contains("Bluetooth is unavailable") -> "Perangkat ini tidak menyediakan Bluetooth."

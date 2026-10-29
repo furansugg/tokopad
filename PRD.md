@@ -165,6 +165,7 @@ Antarmuka minimalis, nyaman, informatif, dan memakai bahasa sehari-hari. Operasi
 - Cadangan mencakup data toko, produk, pelanggan, transaksi, serta pengaturan yang portabel; koneksi printer dikonfigurasi kembali bila perlu.
 - Format cadangan memiliki versi dan validasi integritas serta relasi data.
 - Pemulihan MVP mengganti dataset, bukan menggabungkan dua database.
+- Implementasi MVP membatasi cadangan 64 MiB UTF-8. Anggaran data tersimpan 28 MiB ditegakkan dalam transaksi database agar data tetap dapat diekspor; penulisan yang melampaui batas ditolak tanpa perubahan parsial.
 - Jelaskan konsekuensi, minta konfirmasi, dan sediakan cadangan data saat ini sebelum penggantian.
 - Validasi file sepenuhnya sebelum mengganti data; pemulihan atomik dan dapat dibatalkan jika gagal.
 - Cadangan berisi data sensitif; pengguna diberi peringatan sebelum ekspor. Jangan menyebut file terenkripsi jika enkripsi belum diterapkan.

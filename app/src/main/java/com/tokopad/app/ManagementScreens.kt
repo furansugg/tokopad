@@ -32,6 +32,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
@@ -109,7 +110,7 @@ private fun ManagementChoice(label: String, selected: Boolean, onClick: () -> Un
 @Composable
 fun ProductsScreen(products: List<Product>, language: String, onSave: (Product, () -> Unit) -> Unit) {
     var search by remember { mutableStateOf("") }
-    var editing by remember { mutableStateOf<Product?>(null) }
+    var editing by rememberSaveable { mutableStateOf<Product?>(null) }
     val query = search.trim()
     val visible = remember(products, query) {
         products.filter { product ->
@@ -159,11 +160,11 @@ fun ProductsScreen(products: List<Product>, language: String, onSave: (Product, 
 
 @Composable
 private fun ProductEditor(product: Product, language: String, onDismiss: () -> Unit, onSave: (Product) -> Unit) {
-    var draft by remember(product) { mutableStateOf(product) }
-    var price by remember(product) { mutableStateOf(if (product.id == 0L) "" else product.price.toString()) }
-    var cost by remember(product) { mutableStateOf(product.cost?.toString().orEmpty()) }
-    var stock by remember(product) { mutableStateOf(product.stock.toString()) }
-    var nominal by remember(product) { mutableStateOf(product.nominal.toString()) }
+    var draft by rememberSaveable(product) { mutableStateOf(product) }
+    var price by rememberSaveable(product) { mutableStateOf(if (product.id == 0L) "" else product.price.toString()) }
+    var cost by rememberSaveable(product) { mutableStateOf(product.cost?.toString().orEmpty()) }
+    var stock by rememberSaveable(product) { mutableStateOf(product.stock.toString()) }
+    var nominal by rememberSaveable(product) { mutableStateOf(product.nominal.toString()) }
     var attempted by remember(product) { mutableStateOf(false) }
     var kindsOpen by remember { mutableStateOf(false) }
     val physical = draft.kind == ProductKind.PHYSICAL
@@ -252,7 +253,7 @@ fun CustomersScreen(
     onHistory: (Customer) -> Unit,
 ) {
     var search by remember { mutableStateOf("") }
-    var editing by remember { mutableStateOf<Customer?>(null) }
+    var editing by rememberSaveable { mutableStateOf<Customer?>(null) }
     var deleting by remember { mutableStateOf<Customer?>(null) }
     val query = search.trim()
     val visible = remember(customers, query) {
@@ -311,7 +312,7 @@ fun CustomersScreen(
 
 @Composable
 private fun CustomerEditor(customer: Customer, language: String, onDismiss: () -> Unit, onSave: (Customer) -> Unit) {
-    var draft by remember(customer) { mutableStateOf(customer) }
+    var draft by rememberSaveable(customer) { mutableStateOf(customer) }
     var attempted by remember(customer) { mutableStateOf(false) }
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -350,7 +351,7 @@ fun SettingsScreen(
     onExport: () -> Unit,
     onImport: () -> Unit,
 ) {
-    var draft by remember(settings) { mutableStateOf(settings) }
+    var draft by rememberSaveable(settings) { mutableStateOf(settings) }
     var attempted by remember(settings) { mutableStateOf(false) }
     val language = draft.language
     Column(

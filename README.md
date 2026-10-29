@@ -43,4 +43,4 @@ Full requirements: [PRD.md](PRD.md).
 
 ### Deliberate limits
 
-One store/device, whole-unit stock, IDR, manual digital fulfillment, manual payments. History displays up to 500 matches. No cloud sync, staff accounts, partial returns, provider integration, or automatic refund.
+One store/device, whole-unit stock, IDR, manual digital fulfillment, manual payments. History displays up to 500 matches. A transactional 28 MiB data budget keeps JSON backups within the 64 MiB import/export limit; writes exceeding the budget are rejected without partial changes. Export before beginning a new dataset when that limit is reached. No cloud sync, staff accounts, partial returns, provider integration, or automatic refund.

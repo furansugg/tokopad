@@ -59,9 +59,36 @@ class StoreTest {
         val request = java.util.UUID.randomUUID().toString()
         val first = store.checkout(listOf(CartLine(product, 2)), null, 0, "cash", 200, request)
         val retry = store.checkout(listOf(CartLine(product, 2)), null, 0, "cash", 200, request)
+        rejected { store.checkout(listOf(CartLine(product)), null, 0, "cash", 100, request) }
         assertEquals(first, retry)
         assertEquals(1, store.sales().size)
         assertEquals(3L, store.products().single().stock)
+    }
+
+    @Test fun storageQuotaRejectsInsertWithoutChangingData() {
+        val original = store.exportBackup()
+        context.openOrCreateDatabase("tokopad.db", Context.MODE_PRIVATE, null).use { db ->
+            val actual = db.rawQuery("SELECT bytes FROM storage_budget WHERE id = 1", null).use { c ->
+                c.moveToFirst(); c.getLong(0)
+            }
+            val nearLimit = 28L * 1024 * 1024 - 1
+            db.execSQL("UPDATE storage_budget SET bytes = ? WHERE id = 1", arrayOf(nearLimit))
+            try {
+                try {
+                    store.saveProduct(Product(name = "Over quota", price = 100))
+                    fail("Expected storage quota rejection")
+                } catch (e: IllegalArgumentException) {
+                    assertEquals("Local data limit reached; export backup before starting a new dataset", e.message)
+                }
+                assertTrue(store.products(true).isEmpty())
+                assertEquals(original, store.exportBackup())
+                db.rawQuery("SELECT bytes FROM storage_budget WHERE id = 1", null).use { c ->
+                    c.moveToFirst(); assertEquals(nearLimit, c.getLong(0))
+                }
+            } finally {
+                db.execSQL("UPDATE storage_budget SET bytes = ? WHERE id = 1", arrayOf(actual))
+            }
+        }
     }
 
     @Test fun cancellationRestoresDeactivatedProductExactlyOnce() {

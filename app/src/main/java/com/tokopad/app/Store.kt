@@ -3,6 +3,7 @@ package com.tokopad.app
 import android.content.ContentValues
 import android.content.Context
 import android.database.Cursor
+import android.database.sqlite.SQLiteConstraintException
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import org.json.JSONArray
@@ -23,6 +24,14 @@ class Store(context: Context) : java.io.Closeable {
             db.execSQL("CREATE TABLE sales (id INTEGER PRIMARY KEY AUTOINCREMENT, number TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL, total INTEGER NOT NULL CHECK(total >= 0), customer_id INTEGER REFERENCES customers(id) ON DELETE SET NULL, cancelled_at INTEGER, cancellation_reason TEXT NOT NULL DEFAULT '', data TEXT NOT NULL)")
             db.execSQL("CREATE INDEX sales_created_at ON sales(created_at)")
             db.execSQL("CREATE INDEX sales_customer_id ON sales(customer_id)")
+            // ponytail: sum(UTF-8 data bytes + 256/row) <= 28 MiB keeps escaped backups below 64 MiB; raise only with the backup ceiling.
+            db.execSQL("CREATE TABLE storage_budget (id INTEGER PRIMARY KEY CHECK(id = 1), bytes INTEGER NOT NULL CONSTRAINT storage_budget_limit CHECK(bytes BETWEEN 0 AND $MAX_STORAGE_BYTES))")
+            db.execSQL("INSERT INTO storage_budget (id, bytes) VALUES (1, 0)")
+            for (table in listOf("products", "customers", "sales", "settings")) {
+                db.execSQL("CREATE TRIGGER ${table}_budget_insert AFTER INSERT ON $table BEGIN UPDATE storage_budget SET bytes = bytes + length(CAST(NEW.data AS BLOB)) + 256 WHERE id = 1; END")
+                db.execSQL("CREATE TRIGGER ${table}_budget_update AFTER UPDATE OF data ON $table BEGIN UPDATE storage_budget SET bytes = bytes + length(CAST(NEW.data AS BLOB)) - length(CAST(OLD.data AS BLOB)) WHERE id = 1; END")
+                db.execSQL("CREATE TRIGGER ${table}_budget_delete AFTER DELETE ON $table BEGIN UPDATE storage_budget SET bytes = bytes - length(CAST(OLD.data AS BLOB)) - 256 WHERE id = 1; END")
+            }
         }
 
         override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -39,6 +48,11 @@ class Store(context: Context) : java.io.Closeable {
             val result = block(db)
             db.setTransactionSuccessful()
             return result
+        } catch (e: SQLiteConstraintException) {
+            if (e.message.orEmpty().contains("budget", ignoreCase = true)) {
+                throw IllegalArgumentException("Local data limit reached; export backup before starting a new dataset", e)
+            }
+            throw e
         } finally {
             db.endTransaction()
         }
@@ -102,7 +116,16 @@ class Store(context: Context) : java.io.Closeable {
         customer?.let { validateCustomer(it, allowNew = true) }
         return transaction { db ->
             db.query("sales", null, "number = ?", arrayOf(requestId), null, null, null).use { c ->
-                if (c.moveToFirst()) return@transaction sale(c)
+                if (c.moveToFirst()) {
+                    val existing = sale(c)
+                    fun signature(items: List<CartLine>) = items.map { listOf(it.product.id.toString(), it.product.price.toString(), it.quantity.toString(), it.destination, it.code, it.note) }
+                    require(signature(existing.lines) == signature(lines) && existing.discount == discount &&
+                        existing.payment == payment && existing.paid == paid &&
+                        existing.customerName == customer?.name.orEmpty() && existing.customerPhone == customer?.phone.orEmpty()) {
+                        "Checkout request already used for a different sale; discard the cart and start again"
+                    }
+                    return@transaction existing
+                }
             }
             requireCapacity(db, "sales", MAX_SALES)
             var subtotal = 0L
@@ -173,9 +196,11 @@ class Store(context: Context) : java.io.Closeable {
                 require(line.quantity <= MAX_QUANTITY - product.stock) { "Restored stock exceeds limit" }
                 db.execSQL("UPDATE products SET stock = stock + ? WHERE id = ?", arrayOf(line.quantity, product.id))
             }
+            val timestamp = maxOf(System.currentTimeMillis(), sale.createdAt)
             val values = ContentValues().apply {
-                put("cancelled_at", maxOf(System.currentTimeMillis(), sale.createdAt))
+                put("cancelled_at", timestamp)
                 put("cancellation_reason", reason)
+                put("data", saleJson(sale.copy(cancelledAt = timestamp, cancellationReason = reason)).toString())
             }
             check(db.update("sales", values, "id = ? AND cancelled_at IS NULL", arrayOf(id.toString())) == 1)
         }
@@ -236,9 +261,10 @@ class Store(context: Context) : java.io.Closeable {
     private fun readSettings(db: SQLiteDatabase): ShopSettings =
         db.query("settings", null, "id = 1", null, null, null, null).use { if (it.moveToFirst()) parseSettings(JSONObject(it.string("data"))) else ShopSettings() }
     private fun writeSettings(db: SQLiteDatabase, settings: ShopSettings) {
-        db.insertWithOnConflict("settings", null, ContentValues().apply {
+        val values = ContentValues().apply {
             put("id", 1); put("data", settingsJson(settings).toString())
-        }, SQLiteDatabase.CONFLICT_REPLACE).also { check(it != -1L) { "Could not save settings" } }
+        }
+        if (db.update("settings", values, "id = 1", null) == 0) db.insertOrThrow("settings", null, values)
     }
 
     private fun productValues(p: Product) = ContentValues().apply {
@@ -266,6 +292,7 @@ class Store(context: Context) : java.io.Closeable {
         private const val MAX_CUSTOMERS = 20_000
         private const val MAX_SALES = 100_000
         private const val MAX_LINES = 200
+        private const val MAX_STORAGE_BYTES = 28 * 1024 * 1024
         const val MAX_BACKUP_BYTES = 64 * 1024 * 1024
         private val PAYMENTS = setOf("cash", "noncash")
 

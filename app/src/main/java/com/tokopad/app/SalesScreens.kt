@@ -106,7 +106,7 @@ fun SaleDialog(sale: Sale, settings: ShopSettings, busy: Boolean, onDismiss: () 
 @Composable
 fun CheckoutScreen(products: List<Product>, customers: List<Customer>, cart: List<CartLine>, language: String, busy: Boolean, onCart: (List<CartLine>) -> Unit, onComplete: (Customer?, Long, String, Long) -> Unit) {
     var search by rememberSaveable { mutableStateOf("") }
-    var adding by remember { mutableStateOf<Product?>(null) }
+    var adding by rememberSaveable { mutableStateOf<Product?>(null) }
     var customer by rememberSaveable { mutableStateOf<Customer?>(null) }
     var customerSearch by rememberSaveable { mutableStateOf("") }
     var discount by rememberSaveable { mutableStateOf("") }
@@ -175,10 +175,10 @@ fun CheckoutScreen(products: List<Product>, customers: List<Customer>, cart: Lis
 
 @Composable
 private fun AddLineDialog(product: Product, language: String, onDismiss: () -> Unit, onAdd: (CartLine) -> Unit) {
-    var quantity by remember { mutableStateOf("1") }
-    var destination by remember { mutableStateOf("") }
-    var code by remember { mutableStateOf("") }
-    var note by remember { mutableStateOf("") }
+    var quantity by rememberSaveable(product.id) { mutableStateOf("1") }
+    var destination by rememberSaveable(product.id) { mutableStateOf("") }
+    var code by rememberSaveable(product.id) { mutableStateOf("") }
+    var note by rememberSaveable(product.id) { mutableStateOf("") }
     val needsDestination = product.kind in listOf(ProductKind.PULSA, ProductKind.DATA, ProductKind.ELECTRICITY)
     val q = quantity.toLongOrNull()
     val valid = q != null && q in 1..1_000_000 && (!needsDestination || destination.trim().matches(Regex("[+0-9 -]{5,30}"))) && (!product.requiresCode || code.isNotBlank())

@@ -41,7 +41,7 @@ data class ShopSettings(
     val showDiscount: Boolean = true,
     val paperWidth: Int = 58,
     val printerAddress: String = "",
-)
+) : java.io.Serializable
 
 data class Sale(
     val id: Long,
