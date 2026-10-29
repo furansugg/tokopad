@@ -7,11 +7,57 @@ import java.io.ByteArrayOutputStream
 import java.util.Base64
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Test
 import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class ReceiptLayoutTest {
+    private fun rasterFrames(bytes: ByteArray): List<Triple<Int, Int, ByteArray>> {
+        val frames = mutableListOf<Triple<Int, Int, ByteArray>>()
+        var offset = 0
+        while (offset + 8 <= bytes.size) {
+            if (bytes.copyOfRange(offset, offset + 4).contentEquals(byteArrayOf(0x1d, 0x76, 0x30, 0))) {
+                val stride = (bytes[offset + 4].toInt() and 255) + ((bytes[offset + 5].toInt() and 255) shl 8)
+                val height = (bytes[offset + 6].toInt() and 255) + ((bytes[offset + 7].toInt() and 255) shl 8)
+                val end = offset + 8 + stride * height
+                assertTrue("Truncated raster", end <= bytes.size)
+                frames += Triple(stride, height, bytes.copyOfRange(offset + 8, end))
+                offset = end
+            } else offset++
+        }
+        return frames
+    }
+
+    @Test fun japaneseReceiptFieldsUseNonemptyRasterAndAsciiKeepsFastPath() {
+        val japanese = "日本語のお店"
+        val transaction = sale("").copy(shop = ShopSettings(shopName = japanese, header = "ようこそ", footer = "ありがとうございます"),
+            customerName = "山田太郎", lines = listOf(CartLine(Product(name = "お茶", price = 100))))
+        for ((paper, stride) in listOf(58 to 48, 80 to 72)) {
+            val settings = ShopSettings(paperWidth = paper)
+            val blocks = Receipt.blocks(transaction, settings).filter { block -> block.text.any { it.code > 126 } }
+            val bytes = Receipt.bytes(transaction, settings)
+            val frames = rasterFrames(bytes)
+            assertEquals(blocks.size, frames.size)
+            assertTrue(frames.all { it.first == stride && it.second in 1..2048 && it.third.any { pixel -> pixel != 0.toByte() } })
+            assertTrue(Receipt.text(transaction, settings).contains(japanese))
+            assertTrue(bytes.toString(Charsets.US_ASCII).contains("TOTAL"))
+            val changed = transaction.copy(shop = transaction.shop.copy(shopName = "カタカナショップ"))
+            assertFalse(frames.first().third.contentEquals(rasterFrames(Receipt.bytes(changed, settings)).first().third))
+            assertTrue(rasterFrames(Receipt.bytes(sale("").copy(shop = ShopSettings()), settings)).isEmpty())
+        }
+    }
+
+    @Test fun longJapaneseLinesWrapInsidePrinterRasterWidth() {
+        val transaction = sale("").copy(shop = ShopSettings(shopName = "日".repeat(32)))
+        val image = rasterFrames(Receipt.bytes(transaction, ShopSettings())).single()
+        val shortImage = rasterFrames(Receipt.bytes(transaction.copy(shop = ShopSettings(shopName = "日")), ShopSettings())).single()
+        assertEquals(48, image.first)
+        assertTrue(image.second > shortImage.second)
+        assertTrue(image.second <= 2048)
+    }
+
     private fun sale(logo: String) = Sale(
         id = 1, number = "internal-id", createdAt = 0, zoneId = "UTC",
         lines = emptyList(), customerId = null, customerName = "", customerPhone = "",

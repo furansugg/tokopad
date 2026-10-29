@@ -9,7 +9,15 @@ import android.bluetooth.BluetoothSocket
 import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Typeface
 import android.os.Build
+import android.os.LocaleList
+import android.text.Layout
+import android.text.StaticLayout
+import android.text.TextPaint
 import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.text.NumberFormat
@@ -215,24 +223,38 @@ object Receipt {
     fun bytes(sale: Sale, settings: ShopSettings): ByteArray = ByteArrayOutputStream().apply {
         write(byteArrayOf(0x1b, 0x40, 0x1b, 0x74, 0x00))
         for (block in blocks(sale, settings)) {
-            write(byteArrayOf(0x1b, 0x61, if (block.centered) 1 else 0, 0x1b, 0x45, if (block.emphasis) 1 else 0, 0x1d, 0x21, if (block.large) 0x11 else 0))
-            if (block.logo.isNotEmpty()) write(raster(block.logo)) else write(ascii(block.text))
+            val imageText = block.logo.isEmpty() && block.text.any { it.code > 126 }
+            write(byteArrayOf(0x1b, 0x61, if (block.centered) 1 else 0, 0x1b, 0x45, if (block.emphasis) 1 else 0, 0x1d, 0x21, if (block.large && !imageText) 0x11 else 0))
+            when {
+                block.logo.isNotEmpty() -> write(raster(block.logo))
+                imageText -> write(textRaster(block, settings.paperWidth))
+                else -> write(block.text.toByteArray(Charsets.US_ASCII))
+            }
             write(0x0a)
         }
         write(byteArrayOf(0x1b, 0x61, 0x00, 0x1b, 0x45, 0x00, 0x1d, 0x21, 0x00, 0x0a, 0x0a, 0x0a))
     }.toByteArray()
 
-    private fun ascii(text: String): ByteArray {
-        // ponytail: ASCII subset of CP437; add tested code pages for richer printer glyphs.
-        val safe = StringBuilder()
-        text.codePoints().forEach { code ->
-            safe.append(when (code) {
-                10 -> '\n'
-                in 32..126 -> code.toChar()
-                else -> '?'
-            })
+    private fun textRaster(block: ReceiptBlock, paperWidth: Int): ByteArray {
+        // ponytail: standard 384/576-dot ESC/POS widths; add printer profiles only for hardware needing different dot widths.
+        val width = if (paperWidth == 80) 576 else 384
+        val paint = TextPaint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.BLACK
+            textSize = if (block.large) 48f else 24f
+            typeface = Typeface.create(Typeface.MONOSPACE, if (block.emphasis) Typeface.BOLD else Typeface.NORMAL)
+            textLocales = LocaleList(Locale.JAPANESE, Locale.getDefault())
         }
-        return safe.toString().toByteArray(Charsets.US_ASCII)
+        val layout = StaticLayout.Builder.obtain(block.text, 0, block.text.length, paint, width)
+            .setAlignment(if (block.centered) Layout.Alignment.ALIGN_CENTER else Layout.Alignment.ALIGN_NORMAL)
+            .setIncludePad(true).build()
+        require(layout.height in 1..2048) { "Receipt text image exceeds supported height" }
+        val bitmap = Bitmap.createBitmap(width, layout.height, Bitmap.Config.ARGB_8888)
+        return try {
+            val canvas = Canvas(bitmap)
+            canvas.drawColor(Color.WHITE)
+            layout.draw(canvas)
+            raster(bitmap)
+        } finally { bitmap.recycle() }
     }
 
     private fun raster(logo: String): ByteArray {
@@ -245,22 +267,22 @@ object Receipt {
         BitmapFactory.decodeByteArray(png, 0, png.size, bounds)
         require(bounds.outWidth in 1..384 && bounds.outHeight in 1..192) { "Receipt logo must fit 384 x 192 pixels" }
         val bitmap = requireNotNull(BitmapFactory.decodeByteArray(png, 0, png.size)) { "Invalid receipt logo PNG" }
-        try {
-            val stride = (bitmap.width + 7) / 8
-            val data = ByteArray(stride * bitmap.height)
-            for (y in 0 until bitmap.height) for (x in 0 until bitmap.width) {
-                val pixel = bitmap.getPixel(x, y)
-                val alpha = pixel ushr 24
-                val luminance = (299 * (pixel shr 16 and 255) + 587 * (pixel shr 8 and 255) + 114 * (pixel and 255)) / 1000
-                if (alpha * (255 - luminance) > 127 * 255) {
-                    val offset = y * stride + x / 8
-                    data[offset] = (data[offset].toInt() or (0x80 ushr (x % 8))).toByte()
-                }
+        return try { raster(bitmap) } finally { bitmap.recycle() }
+    }
+
+    private fun raster(bitmap: Bitmap): ByteArray {
+        val stride = (bitmap.width + 7) / 8
+        val data = ByteArray(stride * bitmap.height)
+        for (y in 0 until bitmap.height) for (x in 0 until bitmap.width) {
+            val pixel = bitmap.getPixel(x, y)
+            val alpha = pixel ushr 24
+            val luminance = (299 * (pixel shr 16 and 255) + 587 * (pixel shr 8 and 255) + 114 * (pixel and 255)) / 1000
+            if (alpha * (255 - luminance) > 127 * 255) {
+                val offset = y * stride + x / 8
+                data[offset] = (data[offset].toInt() or (0x80 ushr (x % 8))).toByte()
             }
-            return byteArrayOf(0x1d, 0x76, 0x30, 0x00, stride.toByte(), (stride shr 8).toByte(), bitmap.height.toByte(), (bitmap.height shr 8).toByte()) + data
-        } finally {
-            bitmap.recycle()
         }
+        return byteArrayOf(0x1d, 0x76, 0x30, 0x00, stride.toByte(), (stride shr 8).toByte(), bitmap.height.toByte(), (bitmap.height shr 8).toByte()) + data
     }
 
     fun testText(settings: ShopSettings): String = text(testSale(settings), settings)
@@ -301,10 +323,6 @@ object Receipt {
             (it.name?.takeIf(String::isNotBlank) ?: address) to address
         }
             .sortedBy { it.first }
-
-    suspend fun print(context: Context, address: String, text: String) = send(
-        context, address, byteArrayOf(0x1b, 0x40, 0x1b, 0x74, 0x00) + ascii(text) + byteArrayOf(0x0a, 0x0a, 0x0a),
-    )
 
     suspend fun print(context: Context, address: String, sale: Sale, settings: ShopSettings) =
         withContext(Dispatchers.IO) { send(context, address, bytes(sale, settings)) }
