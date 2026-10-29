@@ -1,6 +1,8 @@
 package com.tokopad.app
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.Color
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.json.JSONObject
@@ -10,6 +12,7 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.security.MessageDigest
+import java.io.ByteArrayOutputStream
 import java.util.Base64
 import java.util.UUID
 
@@ -56,7 +59,15 @@ class StoreTest {
         return envelope.put("payload", payload).put("sha256", digest).toString()
     }
 
-    private fun logo(): String = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII="
+    private fun logo(): String {
+        val bitmap = Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
+        return try {
+            bitmap.eraseColor(Color.BLACK)
+            val output = ByteArrayOutputStream()
+            check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, output))
+            Base64.getEncoder().encodeToString(output.toByteArray())
+        } finally { bitmap.recycle() }
+    }
 
     @Test fun digitalBuyersSaveOnlyWithSuccessfulPaymentAndDeduplicateRetries() {
         val product = digital()
