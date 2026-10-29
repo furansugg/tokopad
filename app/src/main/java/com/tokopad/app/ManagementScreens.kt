@@ -22,7 +22,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -61,12 +61,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.CancellationException
@@ -569,19 +571,24 @@ fun SettingsScreen(
         BoxWithConstraints(Modifier.fillMaxWidth().background(managementMuted, RoundedCornerShape(8.dp))
             .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(8.dp))
             .padding(4.dp)) {
-            val tabWidth = (maxWidth - 6.dp) / 4
+            val tabs = listOf(
+                "general" to l(language, "General", "Umum"),
+                "receipt" to l(language, "Receipt", "Nota"),
+                "printer" to "Printer",
+                "data" to "Data",
+            )
+            val measurer = rememberTextMeasurer()
+            val labelWidth = with(LocalDensity.current) {
+                tabs.maxOf { measurer.measure(it.second, MaterialTheme.typography.labelMedium).size.width }.toDp()
+            }
+            val tabWidth = maxOf((maxWidth - 6.dp) / 4, labelWidth + 16.dp, 58.dp)
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).selectableGroup(),
                 horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                listOf(
-                    "general" to l(language, "General", "Umum"),
-                    "receipt" to l(language, "Receipt", "Nota"),
-                    "printer" to "Printer",
-                    "data" to "Data",
-                ).forEach { (id, label) ->
+                tabs.forEach { (id, label) ->
                     val selected = currentSection == id
                     TextButton(
                         onClick = { onSection(id) },
-                        modifier = Modifier.widthIn(min = tabWidth).heightIn(min = 48.dp).testTag("settings-$id")
+                        modifier = Modifier.width(tabWidth).heightIn(min = 48.dp).testTag("settings-$id")
                             .semantics { this.selected = selected; role = Role.Tab },
                         shape = RoundedCornerShape(8.dp),
                         contentPadding = PaddingValues(horizontal = 8.dp),

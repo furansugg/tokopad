@@ -10,6 +10,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
@@ -103,7 +104,7 @@ class ResponsiveUiTest {
         val settings = mutableStateOf(ShopSettings(language = "id"))
         compose.setContent {
             TokopadTheme {
-                Box(Modifier.width(360.dp).height(640.dp)) {
+                Box(Modifier.width(360.dp).height(640.dp).testTag("settings-container")) {
                     SettingsScreen(
                         settings = settings.value, printers = emptyList(), onSave = { settings.value = it },
                         onFindPrinters = {}, onTestPrint = {}, onExport = {}, onImport = {},
@@ -119,7 +120,8 @@ class ResponsiveUiTest {
         tabs.forEach { assertEquals(tabs.first().width, it.width, 1f) }
         val density = compose.density.density
         assertEquals(20f * density, tabs.first().left, 1f)
-        assertEquals(340f * density, tabs.last().right, 1f)
+        val container = compose.onNodeWithTag("settings-container").fetchSemanticsNode().boundsInRoot
+        assertEquals(container.right - 20f * density, tabs.last().right, 1f)
         compose.onNodeWithText("Bahasa Indonesia").performScrollTo().assertIsSelected()
         compose.onNodeWithText("English").performScrollTo().performClick().assertIsSelected()
         compose.runOnIdle { assertEquals("id", settings.value.language) }
