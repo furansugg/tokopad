@@ -50,8 +50,8 @@ class AppSmokeTest {
         waitForText("Overview")
         compose.onNodeWithText("Overview").assertIsDisplayed()
         compose.onNodeWithText("New sale").assertIsDisplayed()
-        compose.onNodeWithText("On device").assertIsDisplayed()
-        listOf("Home", "Checkout", "History", "More").forEach { label ->
+        compose.onNodeWithText("The Daily Store").assertIsDisplayed()
+        listOf("Home", "Checkout", "Products", "More").forEach { label ->
             compose.onNodeWithText(label).assertIsDisplayed()
         }
         compose.onNodeWithText("Apply dates").assertDoesNotExist()
@@ -65,7 +65,7 @@ class AppSmokeTest {
         screenshot("checkout")
 
         navigate("Products")
-        compose.onNodeWithText("Products").assertIsDisplayed()
+        compose.onNodeWithText("Add product").assertIsDisplayed()
         compose.onNodeWithText("Add product").assertIsDisplayed()
         compose.onNodeWithText("Search products").assertIsDisplayed()
         screenshot("products")
@@ -80,6 +80,11 @@ class AppSmokeTest {
         compose.onNodeWithText("English").assertIsNotEnabled()
         screenshot("settings")
 
+        compose.onNodeWithTag("settings-printer").performClick()
+        compose.onNodeWithText("Find paired printers").performScrollTo().assertIsDisplayed()
+        screenshot("printer")
+        compose.onNodeWithTag("settings-general").performClick()
+
         compose.onNodeWithText("Indonesian").performScrollTo().performClick()
         compose.onNodeWithText("Simpan pengaturan").performScrollTo().performClick()
         waitForText("Pengaturan")
@@ -90,9 +95,13 @@ class AppSmokeTest {
     }
 
     private fun navigate(label: String) {
-        if (label in listOf("Products", "Customers", "Settings")) {
+        if (label == "Products") {
+            compose.onNodeWithTag("nav-products").performClick()
+            waitForText("Add product")
+            return
+        } else if (label in listOf("Customers", "Settings")) {
             compose.onNodeWithTag("nav-more").performClick()
-            waitForText("Your shop")
+            waitForText("Workspace")
             compose.onNodeWithText(label).performScrollTo().performClick()
         } else {
             compose.onNodeWithTag("nav-dashboard").performClick()

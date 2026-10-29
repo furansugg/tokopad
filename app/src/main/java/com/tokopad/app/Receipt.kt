@@ -3,7 +3,9 @@ package com.tokopad.app
 import android.Manifest
 import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
+import android.bluetooth.BluetoothSocket
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
@@ -14,13 +16,8 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import java.util.UUID
-import kotlin.coroutines.resume
-import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeout
 
 object Receipt {
     fun text(sale: Sale, settings: ShopSettings): String {
@@ -173,44 +170,60 @@ object Receipt {
 
     @SuppressLint("MissingPermission")
     fun pairedPrinters(context: Context): List<Pair<String, String>> =
-        adapter(context).bondedDevices.map { (it.name?.takeIf(String::isNotBlank) ?: it.address) to it.address }
+        adapter(context).bondedDevices.map {
+            val address = it.address.uppercase(Locale.ROOT)
+            (it.name?.takeIf(String::isNotBlank) ?: address) to address
+        }
             .sortedBy { it.first }
 
-    @SuppressLint("MissingPermission")
-    suspend fun print(context: Context, address: String, text: String) = withContext(Dispatchers.IO) {
-        require(BluetoothAdapter.checkBluetoothAddress(address)) { "Invalid Bluetooth address" }
-        val socket = adapter(context).getRemoteDevice(address)
-            .createRfcommSocketToServiceRecord(UUID.fromString("00001101-0000-1000-8000-00805F9B34FB"))
-        try {
-            withTimeout(15_000) {
-                suspendCancellableCoroutine<Unit> { continuation ->
-                    continuation.invokeOnCancellation { runCatching { socket.close() } }
-                    launch(Dispatchers.IO) {
-                        try {
-                            socket.connect()
-                            // ponytail: ASCII subset of CP437; add tested code pages for richer printer glyphs.
-                            val safe = StringBuilder()
-                            text.codePoints().forEach { code ->
-                                safe.append(when (code) {
-                                    10 -> '\n'
-                                    in 32..126 -> code.toChar()
-                                    else -> '?'
-                                })
-                            }
-                            val output = socket.outputStream
-                            output.write(byteArrayOf(0x1b, 0x40, 0x1b, 0x74, 0x00))
-                            output.write(safe.toString().toByteArray(Charsets.US_ASCII))
-                            output.write(byteArrayOf(0x0a, 0x0a, 0x0a))
-                            output.flush()
-                            continuation.resume(Unit)
-                        } catch (error: Exception) {
-                            if (continuation.isActive) continuation.resumeWithException(error)
-                        }
-                    }
-                }
-            }
-        } finally {
-            runCatching { socket.close() }
+    suspend fun print(context: Context, address: String, text: String) = withPrinter(context, address) { socket ->
+        // ponytail: ASCII subset of CP437; add tested code pages for richer printer glyphs.
+        val safe = StringBuilder()
+        text.codePoints().forEach { code ->
+            safe.append(when (code) {
+                10 -> '\n'
+                in 32..126 -> code.toChar()
+                else -> '?'
+            })
         }
+        val output = socket.outputStream
+        output.write(byteArrayOf(0x1b, 0x40, 0x1b, 0x74, 0x00))
+        output.write(safe.toString().toByteArray(Charsets.US_ASCII))
+        output.write(byteArrayOf(0x0a, 0x0a, 0x0a))
+        output.flush()
     }
+
+    suspend fun testConnection(context: Context, address: String) = withPrinter(context, address) { }
+
+    @SuppressLint("MissingPermission")
+    private suspend fun withPrinter(context: Context, address: String, write: (BluetoothSocket) -> Unit) =
+        withContext(Dispatchers.IO) {
+            val normalized = address.trim().uppercase(Locale.ROOT)
+            require(BluetoothAdapter.checkBluetoothAddress(normalized)) { "Invalid Bluetooth address" }
+            val adapter = adapter(context)
+            val device = adapter.getRemoteDevice(normalized)
+            if (device.type == BluetoothDevice.DEVICE_TYPE_LE) {
+                throw IOException("Printer is Bluetooth LE-only; Classic Bluetooth SPP is required. BLE printers are not supported.")
+            }
+            if (device.bondState != BluetoothDevice.BOND_BONDED) {
+                throw IOException("Printer is not paired. Pair it in Android Bluetooth settings first.")
+            }
+            val discoveryPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                Manifest.permission.BLUETOOTH_SCAN
+            } else {
+                Manifest.permission.BLUETOOTH_ADMIN
+            }
+            val spp = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")
+            PrinterConnection.use(
+                secure = { device.createRfcommSocketToServiceRecord(spp) },
+                insecure = { device.createInsecureRfcommSocketToServiceRecord(spp) },
+                connect = { socket ->
+                    if (context.checkSelfPermission(discoveryPermission) == PackageManager.PERMISSION_GRANTED) {
+                        adapter.cancelDiscovery()
+                    }
+                    socket.connect()
+                },
+                write = write,
+            )
+        }
 }

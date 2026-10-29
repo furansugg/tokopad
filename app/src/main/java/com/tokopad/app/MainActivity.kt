@@ -1,7 +1,11 @@
 package com.tokopad.app
 
 import android.Manifest
+import android.annotation.SuppressLint
+import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothManager
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
@@ -15,6 +19,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -24,6 +29,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
@@ -79,6 +87,10 @@ private fun Tokopad() {
     var safetyBackup by remember { mutableStateOf<String?>(null) }
     var restoreText by remember { mutableStateOf<String?>(null) }
     var customerHistory by remember { mutableStateOf<Pair<Customer, List<Sale>>?>(null) }
+    var settingsSection by rememberSaveable { mutableStateOf("general") }
+    var printerStatus by remember { mutableStateOf("") }
+    var pendingPrinterAction by remember { mutableStateOf<String?>(null) }
+    var pendingPrintText by remember { mutableStateOf("") }
     val lang = settings.language
 
     suspend fun refresh() {
@@ -107,16 +119,64 @@ private fun Tokopad() {
         }
     }
 
-    fun findPrinters() = runTask {
-        printers = withContext(Dispatchers.IO) { Receipt.pairedPrinters(context) }
-        if (printers.isEmpty()) snackbar.showSnackbar(l(lang, "Pair your printer in Android Bluetooth settings first.", "Pasangkan printer di pengaturan Bluetooth Android dulu."))
+    fun performPrinterAction(action: String, text: String = "") = runTask {
+        printerStatus = ""
+        when (action) {
+            "find" -> {
+                printers = withContext(Dispatchers.IO) { Receipt.pairedPrinters(context) }
+                if (printers.isEmpty()) printerStatus = l(lang, "No paired printers. Pair one in Android settings.", "Belum ada printer dipasangkan. Pasangkan di pengaturan Android.")
+            }
+            "connect" -> {
+                Receipt.testConnection(context, settings.printerAddress)
+                printerStatus = l(lang, "Connection verified. Ready to print.", "Koneksi berhasil diuji. Siap mencetak.")
+            }
+            "print" -> {
+                Receipt.print(context, settings.printerAddress, text)
+                printerStatus = l(lang, "Data sent. Check the paper before printing again.", "Data terkirim. Periksa kertas sebelum mencetak ulang.")
+                snackbar.showSnackbar(printerStatus)
+            }
+        }
     }
 
-    val bluetoothPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (granted) findPrinters() else error = l(lang, "Bluetooth permission denied. Enable it in app settings.", "Izin Bluetooth ditolak. Aktifkan di pengaturan aplikasi.")
+    fun hasBluetoothPermission() = Build.VERSION.SDK_INT < 31 || context.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
+    @SuppressLint("MissingPermission")
+    fun bluetoothEnabled() = hasBluetoothPermission() && context.getSystemService(BluetoothManager::class.java)?.adapter?.isEnabled == true
+
+    val enableBluetooth = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        val action = pendingPrinterAction
+        pendingPrinterAction = null
+        if (bluetoothEnabled() && action != null) performPrinterAction(action, pendingPrintText)
+        else error = l(lang, "Turn on Bluetooth to connect your printer.", "Aktifkan Bluetooth untuk menghubungkan printer.")
     }
-    fun requestPrinters() {
-        if (Build.VERSION.SDK_INT >= 31) bluetoothPermission.launch(Manifest.permission.BLUETOOTH_CONNECT) else findPrinters()
+    val bluetoothPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { _ ->
+        val action = pendingPrinterAction
+        if (!hasBluetoothPermission()) {
+            pendingPrinterAction = null
+            error = l(lang, "Nearby devices permission denied. Allow it in Android app settings.", "Izin perangkat di sekitar ditolak. Izinkan di pengaturan aplikasi Android.")
+        } else if (!bluetoothEnabled()) enableBluetooth.launch(Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE))
+        else {
+            pendingPrinterAction = null
+            if (action != null) performPrinterAction(action, pendingPrintText)
+        }
+    }
+    fun requestPrinterAction(action: String, text: String = "") {
+        if (busy) return
+        if (action != "find" && settings.printerAddress.isBlank()) {
+            selectedSale = null
+            settingsSection = "printer"
+            screen = "settings"
+            error = l(lang, "Select a paired printer first. The selection is saved automatically.", "Pilih printer yang sudah dipasangkan dulu. Pilihan langsung tersimpan.")
+            return
+        }
+        pendingPrinterAction = action
+        pendingPrintText = text
+        if (!hasBluetoothPermission()) bluetoothPermission.launch(arrayOf(Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.BLUETOOTH_SCAN))
+        else if (!bluetoothEnabled()) enableBluetooth.launch(Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE))
+        else { pendingPrinterAction = null; performPrinterAction(action, text) }
+    }
+
+    val bluetoothSettings = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        if (hasBluetoothPermission() && bluetoothEnabled()) performPrinterAction("find")
     }
 
     val openBackup = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -154,6 +214,9 @@ private fun Tokopad() {
     }
 
     LaunchedEffect(Unit) { runTask { refresh() } }
+    LaunchedEffect(screen, settingsSection) {
+        if (screen == "settings" && settingsSection == "printer" && hasBluetoothPermission() && bluetoothEnabled()) performPrinterAction("find")
+    }
 
     fun navigate(target: String) {
         if (screen == "checkout" && cart.isNotEmpty() && target != screen) discardTarget = target
@@ -161,7 +224,8 @@ private fun Tokopad() {
     }
 
     BackHandler(enabled = screen == "checkout" && cart.isNotEmpty()) { discardTarget = "dashboard" }
-    BackHandler(enabled = screen in listOf("products", "customers", "settings")) { screen = "more" }
+    BackHandler(enabled = screen in listOf("customers", "settings")) { screen = "more" }
+    BackHandler(enabled = screen == "products") { screen = "dashboard" }
     BackHandler(enabled = screen == "more" || screen == "history" || (screen == "checkout" && cart.isEmpty())) { screen = "dashboard" }
 
     Scaffold(
@@ -169,35 +233,41 @@ private fun Tokopad() {
         bottomBar = {
             Column {
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                NavigationBar(containerColor = MaterialTheme.colorScheme.surface, tonalElevation = 0.dp) {
+                Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).navigationBarsPadding().padding(horizontal = 8.dp, vertical = 6.dp)) {
                     listOf("dashboard" to l(lang, "Home", "Beranda"), "checkout" to l(lang, "Checkout", "Kasir"),
-                        "history" to l(lang, "History", "Riwayat"), "more" to l(lang, "More", "Lainnya")).forEach { (key, label) ->
-                        val selected = screen == key || (key == "more" && screen in listOf("products", "customers", "settings"))
-                        NavigationBarItem(selected = selected, onClick = { navigate(key) }, enabled = !busy, modifier = Modifier.testTag("nav-$key"),
-                            icon = { PadIcon(if (key == "dashboard") "home" else key, tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant) },
-                            label = { Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                            colors = NavigationBarItemDefaults.colors(indicatorColor = MaterialTheme.colorScheme.secondaryContainer,
-                                selectedTextColor = MaterialTheme.colorScheme.primary))
+                        "products" to l(lang, "Products", "Produk"), "more" to l(lang, "More", "Lainnya")).forEach { (key, label) ->
+                        val selected = screen == key || (key == "more" && screen in listOf("history", "customers", "settings"))
+                        val tint = if (selected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
+                        Column(Modifier.weight(1f).background(if (selected) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent, RoundedCornerShape(8.dp))
+                            .selectable(selected, enabled = !busy, role = Role.Tab, onClick = { navigate(key) }).testTag("nav-$key").padding(vertical = 8.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            PadIcon(if (key == "dashboard") "home" else key, Modifier.size(20.dp), tint)
+                            Text(label, style = MaterialTheme.typography.labelSmall, color = tint, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
                     }
                 }
             }
         },
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding).imePadding()) {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Box(Modifier.size(34.dp).background(MaterialTheme.colorScheme.primary, RoundedCornerShape(10.dp)), contentAlignment = Alignment.Center) {
-                    PadIcon("receipt", Modifier.size(20.dp), Color.White)
+            Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).padding(horizontal = 16.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Box(Modifier.size(28.dp).background(MaterialTheme.colorScheme.primary, RoundedCornerShape(6.dp)), contentAlignment = Alignment.Center) {
+                    PadIcon("receipt", Modifier.size(17.dp), Color.White)
                 }
-                Text("tokopad", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-                Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = RoundedCornerShape(20.dp)) {
-                    Text(l(lang, "On device", "Di perangkat"), Modifier.padding(horizontal = 11.dp, vertical = 6.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
+                Column(Modifier.weight(1f)) {
+                    Text(settings.shopName, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text("Tokopad", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                IconButton(onClick = { settingsSection = "printer"; navigate("settings") }, modifier = Modifier.testTag("open-printer").semantics { contentDescription = l(lang, "Printer settings", "Pengaturan printer") }) {
+                    PadIcon("printer", Modifier.size(20.dp))
                 }
             }
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             if (!loaded) {
                 Button(onClick = { runTask { refresh() } }, enabled = !busy, modifier = Modifier.padding(16.dp)) { Text(l(lang, "Load shop", "Muat toko")) }
             } else Box(Modifier.weight(1f)) {
                 when (screen) {
-                    "more" -> ShopMenu(lang, settings.shopName, onNavigate = { navigate(it) })
+                    "more" -> ShopMenu(lang, settings.shopName, onNavigate = { if (it == "settings") settingsSection = "general"; navigate(it) })
                     "dashboard" -> DashboardScreen(dashboard, sales.take(5), lang, from, to, onRange = { a, b -> from = a; to = b; runTask { refresh() } }, onCheckout = { navigate("checkout") }, onSale = { selectedSale = it })
                     "checkout" -> CheckoutScreen(products.filter { it.active }, customers, cart, lang, busy,
                         onCart = { cart = it }, onComplete = { customer, discount, payment, paid -> runTask {
@@ -217,23 +287,31 @@ private fun Tokopad() {
                         onHistory = { customer -> runTask { customerHistory = customer to withContext(Dispatchers.IO) { store.salesForCustomer(customer.id) } } })
                     "settings" -> SettingsScreen(settings, printers,
                         onSave = { value -> runTask { withContext(Dispatchers.IO) { store.saveSettings(value) }; refresh(); snackbar.showSnackbar(l(value.language, "Settings saved.", "Pengaturan tersimpan.")) } },
-                        onFindPrinters = { requestPrinters() },
-                        onTestPrint = { runTask { Receipt.print(context, settings.printerAddress, Receipt.testText(settings)); snackbar.showSnackbar(l(lang, "Sent. Check the printer before retrying.", "Terkirim. Periksa printer sebelum mengulang.")) } },
-                        onExport = { backupWarning = "export" }, onImport = { backupWarning = "import" })
+                        onFindPrinters = { requestPrinterAction("find") },
+                        onTestPrint = { requestPrinterAction("print", Receipt.testText(settings)) },
+                        onExport = { backupWarning = "export" }, onImport = { backupWarning = "import" },
+                        onSelectPrinter = { address -> runTask {
+                            withContext(Dispatchers.IO) { store.saveSettings(settings.copy(printerAddress = address)) }
+                            settings = settings.copy(printerAddress = address)
+                            printerStatus = l(lang, "Printer saved. Test the connection next.", "Printer tersimpan. Uji koneksi selanjutnya.")
+                        } },
+                        onConnectPrinter = { requestPrinterAction("connect") },
+                        onOpenBluetooth = { bluetoothSettings.launch(Intent(Settings.ACTION_BLUETOOTH_SETTINGS)) },
+                        printerStatus = printerStatus, section = settingsSection, onSection = { settingsSection = it })
                 }
             }
         }
     }
 
     selectedSale?.let { sale -> SaleDialog(sale, settings, busy, onDismiss = { selectedSale = null },
-        onPrint = { runTask { Receipt.print(context, settings.printerAddress, Receipt.text(sale, settings)); snackbar.showSnackbar(l(lang, "Sent. Check the printer before retrying.", "Terkirim. Periksa printer sebelum mengulang.")) } },
+        onPrint = { requestPrinterAction("print", Receipt.text(sale, settings)) },
         onCancel = { reason -> runTask {
             selectedSale = withContext(Dispatchers.IO) { store.cancelSale(sale.id, reason); store.sale(sale.id) }
             refresh()
         } }) }
     error?.let { message -> AlertDialog(onDismissRequest = { error = null }, title = { Text(l(lang, "Couldn't finish", "Belum berhasil")) },
         text = { Text(message) }, confirmButton = { TextButton(onClick = { error = null }) { Text("OK") } },
-        dismissButton = { if (screen == "settings") TextButton(onClick = { context.startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS)); error = null }) { Text("Bluetooth") } }) }
+        dismissButton = { if (screen == "settings") TextButton(onClick = { bluetoothSettings.launch(Intent(Settings.ACTION_BLUETOOTH_SETTINGS)); error = null }) { Text("Bluetooth") } }) }
     discardTarget?.let { target -> AlertDialog(onDismissRequest = { discardTarget = null }, title = { Text(l(lang, "Discard this cart?", "Buang keranjang ini?")) },
         text = { Text(l(lang, "Unsaved items will be lost.", "Item yang belum disimpan akan hilang.")) },
         confirmButton = { TextButton(onClick = { cart = emptyList(); checkoutId = java.util.UUID.randomUUID().toString(); screen = target; discardTarget = null }) { Text(l(lang, "Discard", "Buang")) } },
@@ -266,18 +344,18 @@ private fun Tokopad() {
 
 @Composable
 private fun ShopMenu(language: String, shopName: String, onNavigate: (String) -> Unit) {
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        SectionHeading(l(language, "Your shop", "Toko kamu"), shopName)
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        SectionHeading(l(language, "Workspace", "Ruang toko"), shopName)
         listOf(
-            Triple("products", l(language, "Products", "Produk"), l(language, "Catalog, prices & stock", "Katalog, harga & stok")),
-            Triple("customers", l(language, "Customers", "Pelanggan"), l(language, "People behind every sale", "Pelanggan & riwayat belanja")),
+            Triple("history", l(language, "History", "Riwayat"), l(language, "Transactions & receipts", "Transaksi & nota")),
+            Triple("customers", l(language, "Customers", "Pelanggan"), l(language, "Profiles & purchase history", "Profil & riwayat belanja")),
             Triple("settings", l(language, "Settings", "Pengaturan"), l(language, "Receipts, printer & backups", "Nota, printer & cadangan")),
         ).forEach { (key, title, subtitle) ->
-            OutlinedCard(onClick = { onNavigate(key) }, modifier = Modifier.fillMaxWidth(),
+            OutlinedCard(onClick = { onNavigate(key) }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp),
                 colors = CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.surface),
                 border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
-                Row(Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                    Box(Modifier.size(48.dp).background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(14.dp)), contentAlignment = Alignment.Center) { PadIcon(key) }
+                Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    PadIcon(key, Modifier.size(20.dp))
                     Column(Modifier.weight(1f)) {
                         Text(title, style = MaterialTheme.typography.titleMedium)
                         Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -306,7 +384,10 @@ internal fun operationError(error: Exception, language: String): String {
         message.contains("Bluetooth permission") -> "Izin Bluetooth diperlukan. Cari printer di Pengaturan untuk memberi izin."
         message.contains("Bluetooth is turned off") -> "Bluetooth mati. Aktifkan di pengaturan Android."
         message.contains("Bluetooth is unavailable") -> "Perangkat ini tidak menyediakan Bluetooth."
-        message.contains("Bluetooth address") -> "Pilih printer Bluetooth lalu simpan pengaturan terlebih dahulu."
+        message.contains("Bluetooth address") -> "Pilih printer Bluetooth yang sudah dipasangkan. Pilihan langsung tersimpan."
+        message.contains("BLE", true) -> "Printer ini hanya mendukung BLE. Tokopad saat ini memerlukan Bluetooth Classic ESC/POS. Periksa mode printer atau gunakan printer Classic."
+        message.contains("not paired", true) || message.contains("not bonded", true) -> "Printer belum dipasangkan. Buka pengaturan Bluetooth Android, pasangkan printer, lalu cari kembali."
+        message.contains("connect", true) && error is java.io.IOException -> "Koneksi printer gagal. Pastikan printer menyala, dekat, tidak dipakai aplikasi/perangkat lain, lalu uji koneksi lagi. Jika tetap gagal, kirim model printer dan detail error: $message"
         message.contains("backup", true) || message.contains("JSON", true) -> "Cadangan tidak valid, rusak, terlalu besar, atau versinya tidak didukung. Data lama tidak diubah."
         message.contains("Cash must cover") -> "Pembayaran tunai harus mencukupi total; nontunai harus sama dengan total."
         message.contains("Discount") -> "Diskon harus berupa rupiah bulat dan tidak melebihi subtotal."

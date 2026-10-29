@@ -26,25 +26,25 @@ import androidx.compose.ui.unit.sp
 fun TokopadTheme(content: @Composable () -> Unit) {
     MaterialTheme(
         colorScheme = lightColorScheme(
-            primary = Color(0xFF165C46), onPrimary = Color.White,
-            primaryContainer = Color(0xFFD4EE94), onPrimaryContainer = Color(0xFF203716),
-            secondary = Color(0xFF52665A), onSecondary = Color.White,
-            secondaryContainer = Color(0xFFEBF0E6), onSecondaryContainer = Color(0xFF324536),
-            tertiary = Color(0xFF72582D), tertiaryContainer = Color(0xFFF5EBD7),
-            background = Color(0xFFF7F8F2), onBackground = Color(0xFF192B25),
-            surface = Color.White, onSurface = Color(0xFF192B25),
-            surfaceVariant = Color(0xFFF0F3EB), onSurfaceVariant = Color(0xFF65736A),
-            surfaceContainer = Color.White, surfaceContainerLow = Color(0xFFF8FAF5),
-            surfaceContainerHigh = Color(0xFFF0F3EB), surfaceContainerHighest = Color(0xFFEAF0E5),
-            surfaceTint = Color.Transparent, outline = Color(0xFF89958B), outlineVariant = Color(0xFFE4E8E0),
-            error = Color(0xFFA43232), errorContainer = Color(0xFFFBEAE7),
+            primary = Color(0xFF18181B), onPrimary = Color.White,
+            primaryContainer = Color(0xFFF4F4F5), onPrimaryContainer = Color(0xFF18181B),
+            secondary = Color(0xFF52525B), onSecondary = Color.White,
+            secondaryContainer = Color(0xFFF4F4F5), onSecondaryContainer = Color(0xFF18181B),
+            tertiary = Color(0xFF52525B), tertiaryContainer = Color(0xFFF4F4F5),
+            background = Color(0xFFFAFAFA), onBackground = Color(0xFF09090B),
+            surface = Color.White, onSurface = Color(0xFF09090B),
+            surfaceVariant = Color(0xFFF4F4F5), onSurfaceVariant = Color(0xFF71717A),
+            surfaceContainer = Color.White, surfaceContainerLow = Color(0xFFFAFAFA),
+            surfaceContainerHigh = Color(0xFFF4F4F5), surfaceContainerHighest = Color(0xFFE4E4E7),
+            surfaceTint = Color.Transparent, outline = Color(0xFFA1A1AA), outlineVariant = Color(0xFFE4E4E7),
+            error = Color(0xFFB91C1C), errorContainer = Color(0xFFFEF2F2),
         ),
-        shapes = Shapes(small = RoundedCornerShape(12.dp), medium = RoundedCornerShape(18.dp), large = RoundedCornerShape(24.dp)),
+        shapes = Shapes(extraSmall = RoundedCornerShape(6.dp), small = RoundedCornerShape(8.dp), medium = RoundedCornerShape(10.dp), large = RoundedCornerShape(12.dp), extraLarge = RoundedCornerShape(16.dp)),
         typography = Typography(
-            headlineLarge = TextStyle(fontSize = 34.sp, lineHeight = 40.sp, fontWeight = FontWeight.Bold, letterSpacing = (-1).sp),
+            headlineLarge = TextStyle(fontSize = 30.sp, lineHeight = 36.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.8).sp),
             headlineMedium = TextStyle(fontSize = 28.sp, lineHeight = 34.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.7).sp),
             headlineSmall = TextStyle(fontSize = 24.sp, lineHeight = 30.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.5).sp),
-            titleLarge = TextStyle(fontSize = 22.sp, lineHeight = 28.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.4).sp),
+            titleLarge = TextStyle(fontSize = 20.sp, lineHeight = 26.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.4).sp),
             titleMedium = TextStyle(fontSize = 16.sp, lineHeight = 22.sp, fontWeight = FontWeight.SemiBold),
             titleSmall = TextStyle(fontSize = 14.sp, lineHeight = 20.sp, fontWeight = FontWeight.SemiBold),
             bodyLarge = TextStyle(fontSize = 16.sp, lineHeight = 24.sp),
@@ -83,6 +83,10 @@ fun PadIcon(name: String, modifier: Modifier = Modifier.size(22.dp), tint: Color
                 "check" -> path(5f to 12f, 10f to 17f, 20f to 6f)
                 "plus" -> { line(5f, 12f, 19f, 12f); line(12f, 5f, 12f, 19f) }
                 "minus" -> line(5f, 12f, 19f, 12f)
+                "printer" -> { box(3f, 8f, 18f, 10f); path(7f to 8f, 7f to 3f, 17f to 3f, 17f to 8f); box(7f, 14f, 10f, 7f); line(16f, 11f, 18f, 11f) }
+                "bluetooth" -> { path(7f to 7f, 17f to 17f, 12f to 22f, 12f to 2f, 17f to 7f, 7f to 17f) }
+                "back" -> { line(4f, 12f, 20f, 12f); path(10f to 6f, 4f to 12f, 10f to 18f) }
+                "menu" -> { line(4f, 6f, 20f, 6f); line(4f, 12f, 20f, 12f); line(4f, 18f, 20f, 18f) }
                 else -> { box(4f, 4f, 6f, 6f); box(14f, 4f, 6f, 6f); box(4f, 14f, 6f, 6f); box(14f, 14f, 6f, 6f) }
             }
         }
@@ -102,9 +106,9 @@ fun SectionHeading(title: String, subtitle: String = "", action: (@Composable ()
 
 @Composable
 fun EmptyState(icon: String, title: String, subtitle: String, modifier: Modifier = Modifier) {
-    Surface(modifier.fillMaxWidth(), shape = RoundedCornerShape(22.dp), border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
-        Column(Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Box(Modifier.size(52.dp).background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(16.dp)), contentAlignment = Alignment.Center) { PadIcon(icon, Modifier.size(24.dp)) }
+    Surface(modifier.fillMaxWidth(), shape = RoundedCornerShape(10.dp), border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
+        Column(Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Box(Modifier.size(40.dp).background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp)), contentAlignment = Alignment.Center) { PadIcon(icon, Modifier.size(20.dp)) }
             Text(title, style = MaterialTheme.typography.titleSmall)
             Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
         }
