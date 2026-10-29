@@ -19,6 +19,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -246,9 +248,9 @@ fun CheckoutScreen(products: List<Product>, customers: List<Customer>, cart: Lis
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Surface(shape = RoundedCornerShape(12.dp), color = SalesCream, border = BorderStroke(1.dp, SalesBorder)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            TextButton(enabled = !busy && line.quantity > 1, modifier = Modifier.width(48.dp), contentPadding = PaddingValues(0.dp), onClick = { onCart(cart.mapIndexed { i, value -> if (i == index) value.copy(quantity = value.quantity - 1) else value }) }) { Text("−", color = if (!busy && line.quantity > 1) SalesForest else MaterialTheme.colorScheme.onSurface.copy(alpha = .38f), fontSize = 20.sp) }
+                            TextButton(enabled = !busy && line.quantity > 1, modifier = Modifier.width(48.dp).semantics { contentDescription = l(language, "Decrease quantity for ", "Kurangi jumlah ") + line.product.name }, contentPadding = PaddingValues(0.dp), onClick = { onCart(cart.mapIndexed { i, value -> if (i == index) value.copy(quantity = value.quantity - 1) else value }) }) { Text("−", color = if (!busy && line.quantity > 1) SalesForest else MaterialTheme.colorScheme.onSurface.copy(alpha = .38f), fontSize = 20.sp) }
                             Text("${line.quantity}", modifier = Modifier.padding(horizontal = 6.dp), style = MaterialTheme.typography.labelLarge)
-                            TextButton(enabled = !busy && line.quantity < 1_000_000, modifier = Modifier.width(48.dp), contentPadding = PaddingValues(0.dp), onClick = { onCart(cart.mapIndexed { i, value -> if (i == index) value.copy(quantity = value.quantity + 1) else value }) }) { Text("+", color = if (!busy && line.quantity < 1_000_000) SalesForest else MaterialTheme.colorScheme.onSurface.copy(alpha = .38f), fontSize = 20.sp) }
+                            TextButton(enabled = !busy && line.quantity < 1_000_000, modifier = Modifier.width(48.dp).semantics { contentDescription = l(language, "Increase quantity for ", "Tambah jumlah ") + line.product.name }, contentPadding = PaddingValues(0.dp), onClick = { onCart(cart.mapIndexed { i, value -> if (i == index) value.copy(quantity = value.quantity + 1) else value }) }) { Text("+", color = if (!busy && line.quantity < 1_000_000) SalesForest else MaterialTheme.colorScheme.onSurface.copy(alpha = .38f), fontSize = 20.sp) }
                         }
                     }
                     Spacer(Modifier.weight(1f))

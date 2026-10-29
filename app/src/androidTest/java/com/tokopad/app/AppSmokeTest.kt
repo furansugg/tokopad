@@ -6,6 +6,7 @@ import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -58,7 +59,7 @@ class AppSmokeTest {
         compose.onNodeWithText("Choose dates").assertIsDisplayed()
         compose.onNodeWithText("Cancel").performClick()
 
-        compose.onNodeWithText("Checkout").performClick()
+        compose.onNodeWithTag("nav-checkout").performClick()
         compose.onNodeWithText("Find a product").assertIsDisplayed()
         screenshot("checkout")
 
@@ -89,11 +90,11 @@ class AppSmokeTest {
 
     private fun navigate(label: String) {
         if (label in listOf("Products", "Customers", "Settings")) {
-            compose.onNodeWithText("More").performClick()
+            compose.onNodeWithTag("nav-more").performClick()
             waitForText("Your shop")
             compose.onNodeWithText(label).performScrollTo().performClick()
         } else {
-            compose.onNodeWithText(label).performClick()
+            compose.onNodeWithTag("nav-dashboard").performClick()
         }
         waitForText(label)
     }

@@ -25,6 +25,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -161,6 +162,7 @@ private fun Tokopad() {
 
     BackHandler(enabled = screen == "checkout" && cart.isNotEmpty()) { discardTarget = "dashboard" }
     BackHandler(enabled = screen in listOf("products", "customers", "settings")) { screen = "more" }
+    BackHandler(enabled = screen == "more" || screen == "history" || (screen == "checkout" && cart.isEmpty())) { screen = "dashboard" }
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbar) },
@@ -171,7 +173,7 @@ private fun Tokopad() {
                     listOf("dashboard" to l(lang, "Home", "Beranda"), "checkout" to l(lang, "Checkout", "Kasir"),
                         "history" to l(lang, "History", "Riwayat"), "more" to l(lang, "More", "Lainnya")).forEach { (key, label) ->
                         val selected = screen == key || (key == "more" && screen in listOf("products", "customers", "settings"))
-                        NavigationBarItem(selected = selected, onClick = { navigate(key) }, enabled = !busy,
+                        NavigationBarItem(selected = selected, onClick = { navigate(key) }, enabled = !busy, modifier = Modifier.testTag("nav-$key"),
                             icon = { PadIcon(if (key == "dashboard") "home" else key, tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant) },
                             label = { Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                             colors = NavigationBarItemDefaults.colors(indicatorColor = MaterialTheme.colorScheme.secondaryContainer,
