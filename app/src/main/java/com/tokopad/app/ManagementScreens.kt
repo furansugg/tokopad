@@ -581,14 +581,14 @@ fun SettingsScreen(
             val labelWidth = with(LocalDensity.current) {
                 tabs.maxOf { measurer.measure(it.second, MaterialTheme.typography.labelMedium).size.width }.toDp()
             }
-            val tabWidth = maxOf((maxWidth - 6.dp) / 4, labelWidth + 16.dp, 58.dp)
-            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).selectableGroup(),
+            val stripWidth = maxOf(maxWidth, maxOf(labelWidth + 16.dp, 58.dp) * 4 + 6.dp)
+            Row(Modifier.horizontalScroll(rememberScrollState()).width(stripWidth).selectableGroup(),
                 horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                 tabs.forEach { (id, label) ->
                     val selected = currentSection == id
                     TextButton(
                         onClick = { onSection(id) },
-                        modifier = Modifier.width(tabWidth).heightIn(min = 48.dp).testTag("settings-$id")
+                        modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag("settings-$id")
                             .semantics { this.selected = selected; role = Role.Tab },
                         shape = RoundedCornerShape(8.dp),
                         contentPadding = PaddingValues(horizontal = 8.dp),
