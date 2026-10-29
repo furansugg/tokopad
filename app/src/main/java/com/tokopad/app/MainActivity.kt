@@ -148,12 +148,19 @@ private fun Tokopad() {
         if (bluetoothEnabled() && action != null) performPrinterAction(action, pendingPrintText)
         else error = l(lang, "Turn on Bluetooth to connect your printer.", "Aktifkan Bluetooth untuk menghubungkan printer.")
     }
+    fun requestBluetoothEnable() {
+        try { enableBluetooth.launch(Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)) }
+        catch (_: android.content.ActivityNotFoundException) {
+            pendingPrinterAction = null
+            error = l(lang, "Bluetooth settings are unavailable. Enable Bluetooth from the Android quick settings.", "Pengaturan Bluetooth tidak tersedia. Aktifkan dari pengaturan cepat Android.")
+        }
+    }
     val bluetoothPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { _ ->
         val action = pendingPrinterAction
         if (!hasBluetoothPermission()) {
             pendingPrinterAction = null
             error = l(lang, "Nearby devices permission denied. Allow it in Android app settings.", "Izin perangkat di sekitar ditolak. Izinkan di pengaturan aplikasi Android.")
-        } else if (!bluetoothEnabled()) enableBluetooth.launch(Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE))
+        } else if (!bluetoothEnabled()) requestBluetoothEnable()
         else {
             pendingPrinterAction = null
             if (action != null) performPrinterAction(action, pendingPrintText)
@@ -175,12 +182,18 @@ private fun Tokopad() {
         pendingPrinterAction = action
         pendingPrintText = text
         if (!hasBluetoothPermission()) bluetoothPermission.launch(arrayOf(Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.BLUETOOTH_SCAN))
-        else if (!bluetoothEnabled()) enableBluetooth.launch(Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE))
+        else if (!bluetoothEnabled()) requestBluetoothEnable()
         else { pendingPrinterAction = null; performPrinterAction(action, text) }
     }
 
     val bluetoothSettings = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         if (hasBluetoothPermission() && bluetoothEnabled()) performPrinterAction("find")
+    }
+    fun openBluetoothSettings() {
+        try { bluetoothSettings.launch(Intent(Settings.ACTION_BLUETOOTH_SETTINGS)) }
+        catch (_: android.content.ActivityNotFoundException) {
+            error = l(lang, "Open Bluetooth from Android settings to pair your printer.", "Buka Bluetooth dari pengaturan Android untuk memasangkan printer.")
+        }
     }
 
     val openBackup = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -300,7 +313,7 @@ private fun Tokopad() {
                             printerStatus = "selected"
                         } },
                         onConnectPrinter = { requestPrinterAction("connect") },
-                        onOpenBluetooth = { bluetoothSettings.launch(Intent(Settings.ACTION_BLUETOOTH_SETTINGS)) },
+                        onOpenBluetooth = { openBluetoothSettings() },
                         printerStatus = when (printerStatus) {
                             "verified" -> l(lang, "Connection verified. Ready to print.", "Koneksi berhasil diuji. Siap mencetak.")
                             "sent" -> l(lang, "Data sent. Check the paper before printing again.", "Data terkirim. Periksa kertas sebelum mencetak ulang.")
@@ -320,7 +333,7 @@ private fun Tokopad() {
         } }) }
     error?.let { message -> AlertDialog(onDismissRequest = { error = null }, title = { Text(l(lang, "Couldn't finish", "Belum berhasil")) },
         text = { Text(message) }, confirmButton = { TextButton(onClick = { error = null }) { Text("OK") } },
-        dismissButton = { if (screen == "settings") TextButton(onClick = { bluetoothSettings.launch(Intent(Settings.ACTION_BLUETOOTH_SETTINGS)); error = null }) { Text("Bluetooth") } }) }
+        dismissButton = { if (screen == "settings") TextButton(onClick = { error = null; openBluetoothSettings() }) { Text("Bluetooth") } }) }
     discardTarget?.let { target -> AlertDialog(onDismissRequest = { discardTarget = null }, title = { Text(l(lang, "Discard this cart?", "Buang keranjang ini?")) },
         text = { Text(l(lang, "Unsaved items will be lost.", "Item yang belum disimpan akan hilang.")) },
         confirmButton = { TextButton(onClick = { cart = emptyList(); checkoutId = java.util.UUID.randomUUID().toString(); screen = target; discardTarget = null }) { Text(l(lang, "Discard", "Buang")) } },
@@ -394,7 +407,7 @@ internal fun operationError(error: Exception, language: String): String {
         message.contains("Bluetooth is turned off") -> "Bluetooth mati. Aktifkan di pengaturan Android."
         message.contains("Bluetooth is unavailable") -> "Perangkat ini tidak menyediakan Bluetooth."
         message.contains("Bluetooth address") -> "Pilih printer Bluetooth yang sudah dipasangkan. Pilihan langsung tersimpan."
-        message.contains("BLE", true) -> "Printer ini hanya mendukung BLE. Tokopad saat ini memerlukan Bluetooth Classic ESC/POS. Periksa mode printer atau gunakan printer Classic."
+        message.contains("LE-only", true) || message.contains("BLE printers are not supported", true) -> "Printer ini hanya mendukung BLE. Tokopad saat ini memerlukan Bluetooth Classic ESC/POS. Periksa mode printer atau gunakan printer Classic."
         message.contains("not paired", true) || message.contains("not bonded", true) -> "Printer belum dipasangkan. Buka pengaturan Bluetooth Android, pasangkan printer, lalu cari kembali."
         message.contains("Printer write", true) -> "Pengiriman nota gagal atau melewati batas waktu. Nota mungkin tercetak sebagian. Periksa kertas sebelum mencoba lagi."
         message.contains("connect", true) && error is java.io.IOException -> "Koneksi printer gagal. Pastikan printer menyala, dekat, tidak dipakai aplikasi/perangkat lain, lalu uji koneksi lagi. Jika tetap gagal, kirim model printer dan detail error: $message"

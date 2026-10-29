@@ -14,5 +14,7 @@ class ManagementInputTest {
         assertTrue(operationError(java.io.IOException("Cannot connect to printer using secure or insecure SPP"), "id").contains("Koneksi printer gagal"))
         assertTrue(operationError(java.io.IOException("Printer is Bluetooth LE-only; BLE printers are not supported"), "id").contains("BLE"))
         assertTrue(operationError(java.io.IOException("Printer write failed; receipt may be partially printed"), "en").contains("partially printed"))
+        assertTrue(operationError(java.io.IOException("Cannot connect: Unable to start Service Discovery"), "id").contains("Koneksi printer gagal"))
+        assertTrue(operationError(java.io.IOException("Printer write failed; receipt may be partially printed"), "id").contains("Periksa kertas"))
     }
 }
