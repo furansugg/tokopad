@@ -123,7 +123,7 @@ fun CheckoutScreen(products: List<Product>, customers: List<Customer>, cart: Lis
         item { OutlinedTextField(search, { search = it }, Modifier.fillMaxWidth(), label = { Text(l(language, "Find a product", "Cari produk")) }, singleLine = true) }
         if (products.isEmpty()) item { Text(l(language, "Add products in Products first.", "Tambahkan produk di menu Produk dulu.")) }
         items(products.filter { it.name.contains(search, true) || it.category.contains(search, true) }.take(20), key = { "product-${it.id}" }) { product ->
-            OutlinedCard(onClick = { adding = product }, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
+            OutlinedCard(onClick = { adding = product }, enabled = !busy && cart.size < 200, modifier = Modifier.fillMaxWidth()) {
                 Row(Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.SpaceBetween) {
                     Column(Modifier.weight(1f)) { Text(product.name); if (product.trackStock) Text(l(language, "Stock: ", "Stok: ") + product.stock, style = MaterialTheme.typography.bodySmall) }
                     Text(money(product.price, language))
@@ -131,6 +131,7 @@ fun CheckoutScreen(products: List<Product>, customers: List<Customer>, cart: Lis
             }
         }
         item { HorizontalDivider(); Text(l(language, "Your cart", "Keranjang"), style = MaterialTheme.typography.titleMedium) }
+        if (cart.size >= 200) item { Text(l(language, "Cart limit: 200 lines. Complete this sale before adding more.", "Batas keranjang: 200 baris. Selesaikan penjualan sebelum menambah item.")) }
         if (cart.isEmpty()) item { Text(l(language, "Choose a product to get started.", "Pilih produk untuk mulai.")) }
         items(cart.indices.toList(), key = { "cart-$it" }) { index ->
             val line = cart[index]

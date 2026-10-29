@@ -15,8 +15,18 @@ android {
         versionName = "0.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
+    signingConfigs {
+        val keyPath = System.getenv("TOKOPAD_KEYSTORE_PATH")
+        if (!keyPath.isNullOrBlank()) create("production") {
+            storeFile = file(keyPath)
+            storePassword = System.getenv("TOKOPAD_KEYSTORE_PASSWORD")
+            keyAlias = System.getenv("TOKOPAD_KEY_ALIAS")
+            keyPassword = System.getenv("TOKOPAD_KEY_PASSWORD")
+        }
+    }
     buildTypes {
         release {
+            signingConfig = signingConfigs.findByName("production")
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))

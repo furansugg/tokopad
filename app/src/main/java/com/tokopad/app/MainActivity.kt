@@ -100,7 +100,7 @@ private fun Tokopad() {
         scope.launch {
             try { task() } catch (_: TimeoutCancellationException) { error = l(lang, "Printer timed out. Check the paper before retrying.", "Printer tidak merespons. Periksa kertas sebelum mengulang.") }
             catch (e: CancellationException) { throw e }
-            catch (e: Exception) { error = e.message ?: l(lang, "Operation failed. Try again.", "Proses gagal. Coba lagi.") }
+            catch (e: Exception) { error = operationError(e, lang) }
             finally { busy = false }
         }
     }
@@ -252,3 +252,28 @@ private fun Tokopad() {
 }
 
 private data class AppData(val settings: ShopSettings, val products: List<Product>, val customers: List<Customer>, val sales: List<Sale>, val dashboard: Dashboard)
+
+internal fun operationError(error: Exception, language: String): String {
+    val message = error.message.orEmpty()
+    if (language != "id") return message.ifBlank { "Operation failed. Check your inputs and try again." }
+    return when {
+        error is SecurityException -> "Izin ditolak. Periksa izin aplikasi di pengaturan Android."
+        message.contains("Insufficient stock") -> "Stok tidak cukup. Kurangi jumlah atau perbarui stok produk."
+        message.contains("Price changed") -> "Harga produk berubah. Hapus item terkait, lalu tambahkan kembali."
+        message.contains("inactive", true) -> "Produk sudah nonaktif. Hapus dari keranjang."
+        message.contains("no longer exists") -> "Produk atau pelanggan sudah tidak tersedia. Muat ulang data."
+        message.contains("already cancelled") -> "Transaksi ini sudah dibatalkan. Stok tidak dikembalikan lagi."
+        message.contains("Bluetooth permission") -> "Izin Bluetooth diperlukan. Cari printer di Pengaturan untuk memberi izin."
+        message.contains("Bluetooth is turned off") -> "Bluetooth mati. Aktifkan di pengaturan Android."
+        message.contains("Bluetooth is unavailable") -> "Perangkat ini tidak menyediakan Bluetooth."
+        message.contains("Bluetooth address") -> "Pilih printer Bluetooth lalu simpan pengaturan terlebih dahulu."
+        message.contains("backup", true) || message.contains("JSON", true) -> "Cadangan tidak valid, rusak, terlalu besar, atau versinya tidak didukung. Data lama tidak diubah."
+        message.contains("Cash must cover") -> "Pembayaran tunai harus mencukupi total; nontunai harus sama dengan total."
+        message.contains("Discount") -> "Diskon harus berupa rupiah bulat dan tidak melebihi subtotal."
+        message.contains("code", true) -> "Produk ini memerlukan token atau kode. Lengkapi sebelum menyimpan."
+        message.contains("phone number") -> "Nomor tujuan atau ID pelanggan tidak valid. Periksa kembali."
+        message.contains("limit", true) || message.contains("range", true) || message.contains("amount", true) -> "Nilai atau jumlah data melewati batas aplikasi. Kurangi nilai dan coba lagi."
+        error is java.io.IOException -> "Koneksi printer atau akses file gagal. Periksa perangkat, izin, dan ruang penyimpanan sebelum mengulang."
+        else -> "Proses belum berhasil. Periksa kelengkapan dan panjang isian, lalu coba lagi."
+    }
+}
