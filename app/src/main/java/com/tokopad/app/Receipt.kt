@@ -76,7 +76,7 @@ object Receipt {
             val digits = value.filter { it in '0'..'9' }
             if (digits.isNotEmpty() && value.all { it in '0'..'9' || it == ' ' || it == '-' }) {
                 val groups = digits.chunked(4)
-                val perLine = (width / 2 + 1) / 5
+                val perLine = minOf(3, (width / 2 + 1) / 5)
                 groups.chunked(perLine).forEach { line(it.joinToString(" "), emphasis = true, large = true, centered = true) }
             } else line(value, emphasis = true, large = true, centered = true)
         }
@@ -103,7 +103,7 @@ object Receipt {
                 detail(label("Reason", "Alasan"), sale.cancellationReason)
                 rule()
             }
-            fun field(name: String, value: String) { if (value.isNotBlank()) line("${name.padEnd(6)}: $value") }
+            fun field(name: String, value: String) { if (value.isNotBlank()) line("${name.padEnd(if (id) 6 else 7)}: $value") }
             field("No", sale.receiptNumber)
             field(label("Date", "Tgl"), DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm", locale)
                 .withZone(ZoneId.of(sale.zoneId)).format(Instant.ofEpochMilli(sale.createdAt)))

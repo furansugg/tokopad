@@ -22,6 +22,7 @@ class ReceiptTest {
             assertTrue(sections.zipWithNext().all { (a, b) -> text.indexOf(a) < text.indexOf(b) })
             assertTrue(blocks.all { it.text.codePointCount(0, it.text.length) <= if (it.large) columns / 2 else columns })
             assertEquals("51514314049379930860", blocks.filter { it.large }.joinToString("") { it.text.replace(" ", "") })
+            assertEquals(listOf("5151 4314 0493", "7993 0860"), blocks.filter { it.large }.map { it.text })
             assertTrue(blocks.filter { it.large }.all { it.emphasis && it.centered })
             assertEquals("Nominal" + " ".repeat(columns - 7 - 6) + "24.000", blocks.first { it.text.startsWith("Nominal") }.text)
             assertTrue(blocks.last().centered)
@@ -88,7 +89,7 @@ class ReceiptTest {
         val result = Receipt.text(sale(lines), ShopSettings(paperWidth = 80))
         for (value in listOf(
             "Phone: 001234", "Operator: Operator A", "Nominal: Rp 20,000",
-            "Meter / customer ID: 000987", "TOKEN / STROOM NUMBER\n0011 2233 4455 6677 8899",
+            "Meter / customer ID: 000987", "TOKEN / STROOM NUMBER\n0011 2233 4455\n6677 8899",
             "Phone: 008888", "Package: 10 GB", "Provider: Provider C", "Package: 1 hour",
             "Voucher code: 000CODE", "Destination: 000DEST", "Code: 000OTHER", "Note: Manual service",
         )) assertTrue(value, result.contains(value))
@@ -177,6 +178,16 @@ class ReceiptTest {
         }
     }
 
+    @Test fun englishPlnFieldColonsAlign() {
+        val transaction = sale(listOf(CartLine(Product(name = "PLN", price = 1, kind = ProductKind.ELECTRICITY),
+            buyerName = "Siti", destination = "123", kwh = "1")))
+        val fields = Receipt.blocks(transaction, ShopSettings()).map { it.text }
+            .filter { it.startsWith("No ") || it.startsWith("Date ") || it.startsWith("Cashier:") ||
+                it.startsWith("Buyer ") || it.startsWith("Meter ") || it.startsWith("kWh ") || it.startsWith("Product:") }
+        assertEquals(7, fields.size)
+        assertTrue(fields.all { it.indexOf(':') == 7 })
+    }
+
     @Test fun digitalBuyerMeterKwhAndTokenPrecedePricesAndTotals() {
         val transaction = sale(listOf(CartLine(
             Product(name = "PLN 20", price = 22_000, kind = ProductKind.ELECTRICITY, nominal = 20_000),
@@ -184,7 +195,7 @@ class ReceiptTest {
         )))
         val blocks = Receipt.blocks(transaction, ShopSettings())
         val result = Receipt.text(transaction, ShopSettings())
-        for (value in listOf("Product: PLN 20", "Buyer : Siti", "Meter : 000987", "kWh   : 13.2 kWh")) {
+        for (value in listOf("Product: PLN 20", "Buyer  : Siti", "Meter  : 000987", "kWh    : 13.2 kWh")) {
             assertTrue(value, result.contains(value))
         }
         assertEquals(listOf("1234 5678 9012", "3456 7890"), blocks.filter { it.large }.map { it.text })
@@ -202,7 +213,7 @@ class ReceiptTest {
                 Product(name = kind.name, price = 1, kind = kind, provider = "Provider", packageName = "Package", nominal = 1),
                 buyerName = "Buyer name", destination = "000DEST", code = "ABC123", note = "Service note",
             ))), ShopSettings())
-            assertTrue(kind.name, result.contains(if (kind == ProductKind.ELECTRICITY) "Buyer : Buyer name" else "Buyer: Buyer name"))
+            assertTrue(kind.name, result.contains(if (kind == ProductKind.ELECTRICITY) "Buyer  : Buyer name" else "Buyer: Buyer name"))
             assertTrue(kind.name, result.contains("ABC123"))
             assertTrue(kind.name, result.contains("Note: Service note"))
         }
