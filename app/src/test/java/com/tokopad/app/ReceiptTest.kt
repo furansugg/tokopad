@@ -7,6 +7,31 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ReceiptTest {
+    @Test fun plnReceiptMatchesReferenceSectionsAndAlignedLabels() {
+        val transaction = sale(listOf(CartLine(
+            Product(name = "Token PLN 20000", price = 24_000, nominal = 20_000, kind = ProductKind.ELECTRICITY),
+            buyerName = "JURIAH", destination = "14484689824", kwh = "30", code = "51514314049379930860",
+        ))).copy(discount = 0, total = 24_000, paid = 24_000,
+            shop = ShopSettings(shopName = "RAZZSTORE", address = "JL. BUNGA RAYA GG. SAUDARA", footer = "Terima kasih."))
+        for ((paper, columns) in listOf(58 to 32, 80 to 48)) {
+            val blocks = Receipt.blocks(transaction, ShopSettings(language = "id", paperWidth = paper))
+            val text = blocks.joinToString("\n") { it.text }
+            val sections = listOf("RAZZSTORE", "JL. BUNGA RAYA GG. SAUDARA", "STRUK TOKEN LISTRIK PLN",
+                "No    : TP-00000001", "Tgl   : 01/01/1970 07:00", "Plg   : JURIAH", "Meter : 14484689824",
+                "kWh   : 30 kWh", "Produk: Token PLN 20000", "NOMOR TOKEN / STROOM", "Nominal", "TOTAL", "Bayar (TUNAI)", "Terima kasih.")
+            assertTrue(sections.zipWithNext().all { (a, b) -> text.indexOf(a) < text.indexOf(b) })
+            assertTrue(blocks.all { it.text.codePointCount(0, it.text.length) <= if (it.large) columns / 2 else columns })
+            assertEquals("51514314049379930860", blocks.filter { it.large }.joinToString("") { it.text.replace(" ", "") })
+            assertTrue(blocks.filter { it.large }.all { it.emphasis && it.centered })
+            assertEquals("Nominal" + " ".repeat(columns - 7 - 6) + "24.000", blocks.first { it.text.startsWith("Nominal") }.text)
+            assertTrue(blocks.last().centered)
+            assertTrue(blocks.any { it.text == "=".repeat(columns) })
+            assertFalse(text.contains("Subtotal"))
+            assertFalse(text.contains("20.000"))
+            assertFalse(text.contains("Kembali"))
+        }
+    }
+
     private val shop = ShopSettings(
         shopName = "Original shop", address = "Original address", contact = "0210001",
         header = "Original header", footer = "Original footer", cashier = "Original cashier",
@@ -63,11 +88,11 @@ class ReceiptTest {
         val result = Receipt.text(sale(lines), ShopSettings(paperWidth = 80))
         for (value in listOf(
             "Phone: 001234", "Operator: Operator A", "Nominal: Rp 20,000",
-            "Meter / customer ID: 000987", "Token:\n0011 2233 4455 6677 8899",
+            "Meter / customer ID: 000987", "TOKEN / STROOM NUMBER\n0011 2233 4455 6677 8899",
             "Phone: 008888", "Package: 10 GB", "Provider: Provider C", "Package: 1 hour",
             "Voucher code: 000CODE", "Destination: 000DEST", "Code: 000OTHER", "Note: Manual service",
         )) assertTrue(value, result.contains(value))
-        assertFalse(result.lines().any { it.trimEnd().endsWith(":") && it != "Token:" })
+        assertFalse(result.lines().any { it.trimEnd().endsWith(":") })
     }
 
     @Test fun longLinesWrapWithoutLosingTokensOrAmounts() {
@@ -80,7 +105,7 @@ class ReceiptTest {
             val result = Receipt.text(transaction, ShopSettings(paperWidth = paper))
             assertTrue(result.lines().all { it.codePointCount(0, it.length) <= columns })
             assertTrue(result.contains("Rp 9,223,372,036,854,775,807"))
-            assertTrue(result.substringAfter("Token:").replace(Regex("\\s"), "").startsWith(token))
+            assertTrue(result.substringAfter("TOKEN / STROOM NUMBER").replace(Regex("\\s"), "").startsWith(token))
             val enlarged = Receipt.blocks(transaction, ShopSettings(paperWidth = paper)).filter { it.large }
             assertTrue(enlarged.all { it.text.length <= columns / 2 && it.emphasis && it.centered })
             assertEquals(token, enlarged.joinToString("") { it.text.replace(" ", "") })
@@ -159,16 +184,16 @@ class ReceiptTest {
         )))
         val blocks = Receipt.blocks(transaction, ShopSettings())
         val result = Receipt.text(transaction, ShopSettings())
-        for (value in listOf("PLN 20", "Buyer: Siti", "Meter / customer ID: 000987", "kWh: 13.2")) {
+        for (value in listOf("Product: PLN 20", "Buyer : Siti", "Meter : 000987", "kWh   : 13.2 kWh")) {
             assertTrue(value, result.contains(value))
         }
-        assertEquals(listOf("1234 5678", "9012 3456 7890"), blocks.filter { it.large }.map { it.text })
-        val tokenEnd = result.indexOf("9012 3456 7890")
-        for (label in listOf("Nominal:", "1 x Rp", "Subtotal", "TOTAL", "Paid", "Change")) {
+        assertEquals(listOf("1234 5678 9012", "3456 7890"), blocks.filter { it.large }.map { it.text })
+        val tokenEnd = result.indexOf("3456 7890")
+        for (label in listOf("Amount", "Subtotal", "TOTAL", "Paid", "Change")) {
             assertTrue(label, result.indexOf(label) > tokenEnd)
         }
         assertTrue(blocks.first { it.text.startsWith("TOTAL") }.emphasis)
-        assertTrue(Receipt.text(transaction, ShopSettings(language = "id")).contains("Nama pembeli: Siti"))
+        assertTrue(Receipt.text(transaction, ShopSettings(language = "id")).contains("Plg   : Siti"))
     }
 
     @Test fun digitalTypesKeepBuyerAndSpecializedDetails() {
@@ -177,7 +202,7 @@ class ReceiptTest {
                 Product(name = kind.name, price = 1, kind = kind, provider = "Provider", packageName = "Package", nominal = 1),
                 buyerName = "Buyer name", destination = "000DEST", code = "ABC123", note = "Service note",
             ))), ShopSettings())
-            assertTrue(kind.name, result.contains("Buyer: Buyer name"))
+            assertTrue(kind.name, result.contains(if (kind == ProductKind.ELECTRICITY) "Buyer : Buyer name" else "Buyer: Buyer name"))
             assertTrue(kind.name, result.contains("ABC123"))
             assertTrue(kind.name, result.contains("Note: Service note"))
         }
@@ -192,9 +217,9 @@ class ReceiptTest {
         assertArrayEquals(byteArrayOf(0x1b, 0x40, 0x1b, 0x74, 0x00), bytes.copyOfRange(0, 5))
         val wire = bytes.toString(Charsets.US_ASCII)
         assertTrue(wire.contains("\u001ba\u0001\u001bE\u0001\u001d!\u0000Original shop\n"))
-        assertTrue(wire.contains("\u001ba\u0001\u001bE\u0001\u001d!\u00111234 5678\n"))
-        assertTrue(wire.contains("\u001ba\u0001\u001bE\u0001\u001d!\u00119012 3456 7890\n\u001ba\u0000\u001bE\u0000\u001d!\u0000Nominal:"))
-        assertTrue(wire.indexOf("9012 3456 7890") < wire.indexOf("TOTAL"))
+        assertTrue(wire.contains("\u001ba\u0001\u001bE\u0001\u001d!\u00111234 5678 9012\n"))
+        assertTrue(wire.contains("\u001ba\u0001\u001bE\u0001\u001d!\u00113456 7890\n\u001ba\u0000\u001bE\u0000\u001d!\u0000" + "-".repeat(32)))
+        assertTrue(wire.indexOf("3456 7890") < wire.indexOf("TOTAL"))
         val reset = byteArrayOf(0x1b, 0x61, 0x00, 0x1b, 0x45, 0x00, 0x1d, 0x21, 0x00, 0x0a, 0x0a, 0x0a)
         assertArrayEquals(reset, bytes.takeLast(reset.size).toByteArray())
     }

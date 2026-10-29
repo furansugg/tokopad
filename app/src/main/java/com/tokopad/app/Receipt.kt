@@ -69,7 +69,17 @@ object Receipt {
                 line(value, emphasis = emphasis)
             }
         }
-        fun rule() = line("-".repeat(width))
+        fun rule(character: Char = '-') = line(character.toString().repeat(width))
+        fun token(value: String) {
+            if (value.isBlank()) return
+            line(label("TOKEN / STROOM NUMBER", "NOMOR TOKEN / STROOM"), emphasis = true, centered = true)
+            val digits = value.filter { it in '0'..'9' }
+            if (digits.isNotEmpty() && value.all { it in '0'..'9' || it == ' ' || it == '-' }) {
+                val groups = digits.chunked(4)
+                val perLine = (width / 2 + 1) / 5
+                groups.chunked(perLine).forEach { line(it.joinToString(" "), emphasis = true, large = true, centered = true) }
+            } else line(value, emphasis = true, large = true, centered = true)
+        }
         val date = DateTimeFormatter.ofPattern("dd MMM yyyy HH:mm", locale).withZone(ZoneId.of(sale.zoneId))
         val shop = sale.shop
         require(shop.headerMode in listOf("name", "logo", "both")) { "Unsupported receipt header mode" }
@@ -82,6 +92,49 @@ object Receipt {
         optional(shop.address, centered = true)
         optional(shop.contact, centered = true)
         optional(shop.header, centered = true)
+        val electricityOnly = sale.lines.isNotEmpty() && sale.lines.all { it.product.kind == ProductKind.ELECTRICITY }
+        if (electricityOnly) {
+            rule('=')
+            line(label("PLN ELECTRICITY TOKEN RECEIPT", "STRUK TOKEN LISTRIK PLN"), centered = true)
+            rule('=')
+            if (sale.cancelledAt != null) {
+                line("*** ${label("CANCELLED", "DIBATALKAN")} ***", emphasis = true)
+                detail(label("Cancelled", "Dibatalkan"), date.format(Instant.ofEpochMilli(sale.cancelledAt)))
+                detail(label("Reason", "Alasan"), sale.cancellationReason)
+                rule()
+            }
+            fun field(name: String, value: String) { if (value.isNotBlank()) line("${name.padEnd(6)}: $value") }
+            field("No", sale.receiptNumber)
+            field(label("Date", "Tgl"), DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm", locale)
+                .withZone(ZoneId.of(sale.zoneId)).format(Instant.ofEpochMilli(sale.createdAt)))
+            if (shop.cashier.isNotBlank()) field(label("Cashier", "Kasir"), shop.cashier)
+            for (item in sale.lines) {
+                field(label("Buyer", "Plg"), item.buyerName.ifBlank { sale.customerName })
+                field("Meter", item.destination)
+                field("kWh", item.kwh.takeIf { it.isNotBlank() }?.let { "$it kWh" }.orEmpty())
+                field(label("Product", "Produk"), item.product.name)
+                detail(label("Note", "Catatan"), item.note)
+                rule()
+                token(item.code)
+                rule()
+                // Nominal here is the charged line amount, not the prepaid face value.
+                row(label("Amount", "Nominal"), numbers.format(Math.multiplyExact(item.quantity, item.product.price)))
+                if (item.quantity != 1L) detail(label("Quantity", "Jumlah"), numbers.format(item.quantity))
+                if (sale.lines.size > 1) rule()
+            }
+            if (settings.showDiscount && sale.discount > 0) {
+                row(label("Subtotal", "Subtotal"), money(sale.subtotal))
+                row(label("Discount", "Diskon"), "-${money(sale.discount)}")
+            }
+            rule('=')
+            row("TOTAL", money(sale.total), emphasis = true)
+            val method = if (sale.payment == "cash") label("CASH", "TUNAI") else label("NONCASH", "NONTUNAI")
+            row(label("Paid", "Bayar") + " ($method)", numbers.format(sale.paid))
+            if (sale.paid != sale.total) row(label("Change", "Kembali"), money(Math.subtractExact(sale.paid, sale.total)))
+            rule('=')
+            optional(shop.footer, centered = true)
+            return result
+        }
         rule()
         if (sale.cancelledAt != null) {
             line("*** ${label("CANCELLED", "DIBATALKAN")} ***", emphasis = true)
@@ -113,24 +166,7 @@ object Receipt {
                 ProductKind.ELECTRICITY -> {
                     detail(label("Meter / customer ID", "Meter / ID pelanggan"), item.destination)
                     detail("kWh", item.kwh)
-                    if (item.code.isNotBlank()) {
-                        line("Token:", emphasis = true, centered = true)
-                        val digits = item.code.filter { it in '0'..'9' }
-                        if (digits.isNotEmpty() && item.code.all { it in '0'..'9' || it == ' ' || it == '-' }) {
-                            val groups = digits.chunked(4)
-                            val perLine = (width / 2 + 1) / 5
-                            // Keep complete four-digit groups; the shorter first line balances 58 mm tokens.
-                            var start = 0
-                            var count = (groups.size % perLine).takeIf { it > 0 } ?: perLine
-                            while (start < groups.size) {
-                                line(groups.subList(start, start + count).joinToString(" "), emphasis = true, large = true, centered = true)
-                                start += count
-                                count = minOf(perLine, groups.size - start)
-                            }
-                        } else {
-                            line(item.code, emphasis = true, large = true, centered = true)
-                        }
-                    }
+                    token(item.code)
                     if (product.nominal > 0) detail(label("Nominal", "Nominal"), money(product.nominal))
                 }
                 ProductKind.DATA -> {
@@ -169,7 +205,7 @@ object Receipt {
         row(label("Paid", "Dibayar"), money(sale.paid))
         row(label("Change", "Kembalian"), money(Math.subtractExact(sale.paid, sale.total)))
         rule()
-        optional(shop.footer)
+        optional(shop.footer, centered = true)
         return result
     }
 

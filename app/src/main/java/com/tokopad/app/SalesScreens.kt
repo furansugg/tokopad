@@ -25,6 +25,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -172,7 +173,10 @@ fun SaleDialog(sale: Sale, settings: ShopSettings, busy: Boolean, onDismiss: () 
         text = { Column(Modifier.heightIn(max = 500.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             // Physical receipt paper deliberately stays white in either theme.
             Surface(shape = RoundedCornerShape(8.dp), color = Color.White, contentColor = Color.Black, border = BorderStroke(1.dp, SalesBorder)) {
-                Column(Modifier.fillMaxWidth().padding(12.dp)) {
+                BoxWithConstraints(Modifier.fillMaxWidth().padding(12.dp)) {
+                    val columns = if (settings.paperWidth == 80) 48 else 32
+                    val textSize = minOf(12f, maxWidth.value / LocalDensity.current.fontScale / (columns * 0.62f))
+                    Column(Modifier.fillMaxWidth()) {
                     Receipt.blocks(sale, settings).forEach { block ->
                         val bitmap = remember(block.logo) {
                             if (block.logo.isBlank()) null else runCatching {
@@ -182,9 +186,11 @@ fun SaleDialog(sale: Sale, settings: ShopSettings, busy: Boolean, onDismiss: () 
                         }
                         if (bitmap != null) Image(bitmap, l(language, "Shop logo", "Logo toko"), Modifier.align(Alignment.CenterHorizontally).sizeIn(maxWidth = 160.dp, maxHeight = 100.dp))
                         if (block.text.isNotEmpty()) Text(block.text, Modifier.fillMaxWidth(), fontFamily = FontFamily.Monospace,
-                            fontSize = if (block.large) 20.sp else 11.sp, lineHeight = if (block.large) 26.sp else 16.sp,
+                            fontSize = (if (block.large) textSize * 2 else textSize).sp,
+                            lineHeight = (if (block.large) textSize * 2.5f else textSize * 1.5f).sp,
                             fontWeight = if (block.emphasis || block.large) FontWeight.Bold else FontWeight.Normal,
                             textAlign = if (block.centered) TextAlign.Center else TextAlign.Start, color = Color.Black)
+                    }
                     }
                 }
             }
