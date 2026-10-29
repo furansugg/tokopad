@@ -11,7 +11,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -19,7 +19,11 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -42,10 +46,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            MaterialTheme(colorScheme = lightColorScheme(
-                primary = Color(0xFF226957), secondary = Color(0xFF576B62),
-                background = Color(0xFFF8FAF8), surface = Color(0xFFF8FAF8),
-            )) { Tokopad() }
+            TokopadTheme { Tokopad() }
         }
     }
 }
@@ -159,32 +160,42 @@ private fun Tokopad() {
     }
 
     BackHandler(enabled = screen == "checkout" && cart.isNotEmpty()) { discardTarget = "dashboard" }
+    BackHandler(enabled = screen in listOf("products", "customers", "settings")) { screen = "more" }
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbar) },
         bottomBar = {
             Column {
-                if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
-                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                NavigationBar(containerColor = MaterialTheme.colorScheme.surface, tonalElevation = 0.dp) {
                     listOf("dashboard" to l(lang, "Home", "Beranda"), "checkout" to l(lang, "Checkout", "Kasir"),
-                        "history" to l(lang, "History", "Riwayat"), "products" to l(lang, "Products", "Produk"),
-                        "customers" to l(lang, "Customers", "Pelanggan"), "settings" to l(lang, "Settings", "Pengaturan")).forEach { (key, label) ->
-                        TextButton(onClick = { navigate(key) }, enabled = !busy) { Text(if (screen == key) "• $label" else label) }
+                        "history" to l(lang, "History", "Riwayat"), "more" to l(lang, "More", "Lainnya")).forEach { (key, label) ->
+                        val selected = screen == key || (key == "more" && screen in listOf("products", "customers", "settings"))
+                        NavigationBarItem(selected = selected, onClick = { navigate(key) }, enabled = !busy,
+                            icon = { PadIcon(if (key == "dashboard") "home" else key, tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant) },
+                            label = { Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                            colors = NavigationBarItemDefaults.colors(indicatorColor = MaterialTheme.colorScheme.secondaryContainer,
+                                selectedTextColor = MaterialTheme.colorScheme.primary))
                     }
                 }
-                Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars))
             }
         },
     ) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding).statusBarsPadding().imePadding()) {
-            Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("Tokopad", style = MaterialTheme.typography.headlineSmall)
-                Text(l(lang, "Your shop, in order.", "Toko rapi, jualan nyaman."), style = MaterialTheme.typography.bodySmall)
+        Column(Modifier.fillMaxSize().padding(padding).imePadding()) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Box(Modifier.size(34.dp).background(MaterialTheme.colorScheme.primary, RoundedCornerShape(10.dp)), contentAlignment = Alignment.Center) {
+                    PadIcon("receipt", Modifier.size(20.dp), Color.White)
+                }
+                Text("tokopad", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = RoundedCornerShape(20.dp)) {
+                    Text(l(lang, "On device", "Di perangkat"), Modifier.padding(horizontal = 11.dp, vertical = 6.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
+                }
             }
             if (!loaded) {
                 Button(onClick = { runTask { refresh() } }, enabled = !busy, modifier = Modifier.padding(16.dp)) { Text(l(lang, "Load shop", "Muat toko")) }
             } else Box(Modifier.weight(1f)) {
                 when (screen) {
+                    "more" -> ShopMenu(lang, settings.shopName, onNavigate = { navigate(it) })
                     "dashboard" -> DashboardScreen(dashboard, sales.take(5), lang, from, to, onRange = { a, b -> from = a; to = b; runTask { refresh() } }, onCheckout = { navigate("checkout") }, onSale = { selectedSale = it })
                     "checkout" -> CheckoutScreen(products.filter { it.active }, customers, cart, lang, busy,
                         onCart = { cart = it }, onComplete = { customer, discount, payment, paid -> runTask {
@@ -248,6 +259,31 @@ private fun Tokopad() {
             CircularProgressIndicator()
             Text(l(lang, "Working…", "Sedang diproses…"))
         } }
+    }
+}
+
+@Composable
+private fun ShopMenu(language: String, shopName: String, onNavigate: (String) -> Unit) {
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        SectionHeading(l(language, "Your shop", "Toko kamu"), shopName)
+        listOf(
+            Triple("products", l(language, "Products", "Produk"), l(language, "Catalog, prices & stock", "Katalog, harga & stok")),
+            Triple("customers", l(language, "Customers", "Pelanggan"), l(language, "People behind every sale", "Pelanggan & riwayat belanja")),
+            Triple("settings", l(language, "Settings", "Pengaturan"), l(language, "Receipts, printer & backups", "Nota, printer & cadangan")),
+        ).forEach { (key, title, subtitle) ->
+            OutlinedCard(onClick = { onNavigate(key) }, modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.surface),
+                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
+                Row(Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                    Box(Modifier.size(48.dp).background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(14.dp)), contentAlignment = Alignment.Center) { PadIcon(key) }
+                    Column(Modifier.weight(1f)) {
+                        Text(title, style = MaterialTheme.typography.titleMedium)
+                        Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    PadIcon("chevron", Modifier.size(18.dp))
+                }
+            }
+        }
     }
 }
 
