@@ -54,6 +54,16 @@ class StoreTest {
         assertEquals(Dashboard(200, 1), store.dashboard(0, Long.MAX_VALUE))
     }
 
+    @Test fun retryingCheckoutRequestDoesNotDuplicateSaleOrStock() {
+        val product = product()
+        val request = java.util.UUID.randomUUID().toString()
+        val first = store.checkout(listOf(CartLine(product, 2)), null, 0, "cash", 200, request)
+        val retry = store.checkout(listOf(CartLine(product, 2)), null, 0, "cash", 200, request)
+        assertEquals(first, retry)
+        assertEquals(1, store.sales().size)
+        assertEquals(3L, store.products().single().stock)
+    }
+
     @Test fun cancellationRestoresDeactivatedProductExactlyOnce() {
         val product = product()
         val sale = store.checkout(listOf(CartLine(product, 2)), null, 0, "cash", 200)

@@ -93,13 +93,17 @@ class Store(context: Context) : java.io.Closeable {
         transaction { db -> writeSettings(db, settings) }
     }
 
-    fun checkout(lines: List<CartLine>, customer: Customer?, discount: Long, payment: String, paid: Long): Sale {
+    fun checkout(lines: List<CartLine>, customer: Customer?, discount: Long, payment: String, paid: Long, requestId: String = UUID.randomUUID().toString()): Sale {
+        require(UUID.fromString(requestId).toString() == requestId) { "Invalid checkout request" }
         require(lines.isNotEmpty() && lines.size <= MAX_LINES) { "Cart must contain 1–$MAX_LINES lines" }
         amount(discount, "Discount")
         amount(paid, "Paid amount")
         require(payment in PAYMENTS) { "Payment must be cash or noncash" }
         customer?.let { validateCustomer(it, allowNew = true) }
         return transaction { db ->
+            db.query("sales", null, "number = ?", arrayOf(requestId), null, null, null).use { c ->
+                if (c.moveToFirst()) return@transaction sale(c)
+            }
             requireCapacity(db, "sales", MAX_SALES)
             var subtotal = 0L
             val snapshots = lines.map { line ->
@@ -125,7 +129,7 @@ class Store(context: Context) : java.io.Closeable {
             val currentCustomer = customer?.takeIf { it.id > 0 }?.let { findCustomer(db, it.id) }
             val customerSnapshot = currentCustomer ?: customer
             val sale = Sale(
-                id = 0, number = UUID.randomUUID().toString(), createdAt = System.currentTimeMillis(),
+                id = 0, number = requestId, createdAt = System.currentTimeMillis(),
                 zoneId = ZoneId.systemDefault().id, lines = snapshots,
                 customerId = currentCustomer?.id, customerName = customerSnapshot?.name.orEmpty(),
                 customerPhone = customerSnapshot?.phone.orEmpty(), subtotal = subtotal, discount = discount,

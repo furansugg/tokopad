@@ -66,6 +66,7 @@ private fun Tokopad() {
     var query by remember { mutableStateOf("") }
     var screen by rememberSaveable { mutableStateOf("dashboard") }
     var cart by rememberSaveable { mutableStateOf(emptyList<CartLine>()) }
+    var checkoutId by rememberSaveable { mutableStateOf(java.util.UUID.randomUUID().toString()) }
     var busy by remember { mutableStateOf(false) }
     var loaded by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -187,8 +188,9 @@ private fun Tokopad() {
                     "dashboard" -> DashboardScreen(dashboard, sales.take(5), lang, from, to, onRange = { a, b -> from = a; to = b; runTask { refresh() } }, onCheckout = { navigate("checkout") }, onSale = { selectedSale = it })
                     "checkout" -> CheckoutScreen(products.filter { it.active }, customers, cart, lang, busy,
                         onCart = { cart = it }, onComplete = { customer, discount, payment, paid -> runTask {
-                            val sale = withContext(Dispatchers.IO) { store.checkout(cart, customer, discount, payment, paid) }
+                            val sale = withContext(Dispatchers.IO) { store.checkout(cart, customer, discount, payment, paid, checkoutId) }
                             cart = emptyList()
+                            checkoutId = java.util.UUID.randomUUID().toString()
                             screen = "history"
                             selectedSale = sale
                             refresh()
