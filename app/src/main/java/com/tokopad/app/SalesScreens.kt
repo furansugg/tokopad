@@ -110,9 +110,7 @@ fun DashboardScreen(data: Dashboard, sales: List<Sale>, language: String, from: 
             PadIcon("arrow", tint = Color.White)
         } }
         item { SectionHeading(l(language, "Recent transactions", "Transaksi terbaru")) }
-        if (sales.isEmpty()) item { Surface(shape = RoundedCornerShape(24.dp), color = Color.White, border = BorderStroke(1.dp, SalesBorder)) {
-            EmptyState("receipt", l(language, "Your first sale starts here", "Penjualan pertamamu dimulai di sini"), l(language, "Make a new sale. We’ll keep everything in order.", "Mulai jualan. Semua transaksi akan tercatat rapi."), Modifier.fillMaxWidth().padding(12.dp))
-        } }
+        if (sales.isEmpty()) item { EmptyState("receipt", l(language, "No sales yet", "Belum ada penjualan"), l(language, "Completed sales appear here.", "Penjualan selesai akan tampil di sini.")) }
         items(sales, key = { it.id }) { SaleRow(it, language, onSale) }
         item { Spacer(Modifier.height(16.dp)) }
     }
@@ -197,7 +195,7 @@ fun CheckoutScreen(products: List<Product>, customers: List<Customer>, cart: Lis
     val canComplete = cart.isNotEmpty() && total != null && paidValue != null && paidValue >= total && !busy
     val matchingProducts = products.filter { it.name.contains(search, true) || it.category.contains(search, true) }
     LazyColumn(Modifier.fillMaxSize().background(SalesCream), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        item { SectionHeading(l(language, "Checkout", "Kasir"), l(language, "Good things, ready to go.", "Siap melayani pelangganmu.")) }
+        item { SectionHeading(l(language, "Checkout", "Kasir")) }
         item { OutlinedTextField(search, { search = it }, Modifier.fillMaxWidth(), shape = RoundedCornerShape(18.dp), leadingIcon = { PadIcon("search") }, label = { Text(l(language, "Find a product", "Cari produk")) }, singleLine = true) }
         if (products.isEmpty()) item { EmptyState("products", l(language, "Your shelves are waiting", "Rak tokomu masih kosong"), l(language, "Add products in Products first.", "Tambahkan produk di menu Produk dulu.")) }
         else if (matchingProducts.isEmpty()) item { EmptyState("search", l(language, "No products found", "Produk tidak ditemukan"), l(language, "Try a different name or category.", "Coba nama atau kategori lain.")) }
@@ -231,9 +229,7 @@ fun CheckoutScreen(products: List<Product>, customers: List<Customer>, cart: Lis
         if (search.isBlank() && products.size > 8) item { Text(l(language, "Search to find more products.", "Cari untuk melihat produk lainnya."), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         item { Spacer(Modifier.height(8.dp)); SectionHeading(l(language, "Your cart", "Keranjang"), "${cart.size} " + l(language, "items in this sale", "item dalam penjualan ini")) }
         if (cart.size >= 200) item { Text(l(language, "Cart limit: 200 lines. Complete this sale before adding more.", "Batas keranjang: 200 baris. Selesaikan penjualan sebelum menambah item.")) }
-        if (cart.isEmpty()) item { Surface(shape = RoundedCornerShape(20.dp), color = Color.White, border = BorderStroke(1.dp, SalesBorder)) {
-            EmptyState("checkout", l(language, "A fresh start", "Siap mulai jualan"), l(language, "Choose a product to get started.", "Pilih produk untuk mulai."), Modifier.fillMaxWidth())
-        } }
+        if (cart.isEmpty()) item { EmptyState("checkout", l(language, "Cart is empty", "Keranjang kosong"), l(language, "Choose a product to get started.", "Pilih produk untuk mulai.")) }
         items(cart.indices.toList(), key = { "cart-$it" }) { index ->
             val line = cart[index]
             Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp), color = Color.White, contentColor = SalesInk, border = BorderStroke(1.dp, SalesBorder)) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -260,7 +256,7 @@ fun CheckoutScreen(products: List<Product>, customers: List<Customer>, cart: Lis
                 }
             } }
         }
-        item { Spacer(Modifier.height(8.dp)); SectionHeading(l(language, "Customer", "Pelanggan"), l(language, "A personal touch. Always optional.", "Lebih personal. Tetap opsional.")) }
+        item { Spacer(Modifier.height(8.dp)); SectionHeading(l(language, "Customer", "Pelanggan"), l(language, "Optional", "Opsional")) }
         item { OutlinedTextField(customerSearch, { customerSearch = it }, Modifier.fillMaxWidth(), shape = RoundedCornerShape(18.dp), leadingIcon = { PadIcon("customers") }, label = { Text(l(language, "Find customer (optional)", "Cari pelanggan (opsional)")) }, singleLine = true) }
         if (customerSearch.isNotBlank()) items(customers.filter { it.name.contains(customerSearch, true) || it.phone.contains(customerSearch) }.take(5), key = { "customer-${it.id}" }) { value ->
             TextButton(onClick = { customer = value; customerSearch = "" }) { Text("${value.name} · ${value.phone}") }
@@ -268,7 +264,7 @@ fun CheckoutScreen(products: List<Product>, customers: List<Customer>, cart: Lis
         item {
             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 TextButton(onClick = { customer = null }, colors = ButtonDefaults.textButtonColors(contentColor = SalesForest)) { Text(customer?.let { "${it.name} ×" } ?: l(language, "Walk-in customer", "Pelanggan umum")) }
-                SectionHeading(l(language, "Payment", "Pembayaran"), l(language, "One last detail, then you’re done.", "Selangkah lagi, transaksi selesai."))
+                SectionHeading(l(language, "Payment", "Pembayaran"))
                 Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp), color = Color.White, contentColor = SalesInk, border = BorderStroke(1.dp, SalesBorder)) {
                     Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {

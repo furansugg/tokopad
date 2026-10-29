@@ -49,7 +49,14 @@ class AppSmokeTest {
         waitForText("A little overview")
         compose.onNodeWithText("A little overview").assertIsDisplayed()
         compose.onNodeWithText("On device").assertIsDisplayed()
+        listOf("Home", "Checkout", "History", "More").forEach { label ->
+            compose.onNodeWithText(label).assertIsDisplayed()
+        }
+        compose.onNodeWithText("Apply dates").assertDoesNotExist()
         screenshot("home")
+        compose.onNodeWithText("Today").performClick()
+        compose.onNodeWithText("Choose dates").assertIsDisplayed()
+        compose.onNodeWithText("Cancel").performClick()
 
         compose.onNodeWithText("Checkout").performClick()
         compose.onNodeWithText("Find a product").assertIsDisplayed()
@@ -84,8 +91,10 @@ class AppSmokeTest {
         if (label in listOf("Products", "Customers", "Settings")) {
             compose.onNodeWithText("More").performClick()
             waitForText("Your shop")
+            compose.onNodeWithText(label).performScrollTo().performClick()
+        } else {
+            compose.onNodeWithText(label).performClick()
         }
-        compose.onNodeWithText(label).performScrollTo().performClick()
         waitForText(label)
     }
 
