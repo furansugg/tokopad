@@ -28,6 +28,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -378,6 +379,7 @@ private fun AddLineDialog(product: Product, customers: List<Customer>, language:
     var kwh by rememberSaveable(product.id, initialLine) { mutableStateOf(initialLine?.kwh.orEmpty()) }
     var customerId by rememberSaveable(product.id, initialLine) { mutableStateOf(initialLine?.customerId) }
     var buyerSearch by rememberSaveable(product.id, initialLine) { mutableStateOf("") }
+    var showBuyers by rememberSaveable(product.id, initialLine) { mutableStateOf(true) }
     val electricity = product.kind == ProductKind.ELECTRICITY
     val digital = product.kind != ProductKind.PHYSICAL
     val needsDestination = product.kind in listOf(ProductKind.PULSA, ProductKind.DATA, ProductKind.ELECTRICITY)
@@ -393,22 +395,39 @@ private fun AddLineDialog(product: Product, customers: List<Customer>, language:
             Text(money(product.price, language), style = MaterialTheme.typography.titleLarge, color = SalesInk, fontWeight = FontWeight.SemiBold)
             if (!digital) OutlinedTextField(quantity, { quantity = it.filter(Char::isDigit).take(7) }, Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), label = { Text(l(language, "Quantity", "Jumlah")) }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, isError = q == null || q !in 1..maxQuantity)
             if (digital) {
-                OutlinedTextField(buyerSearch, { buyerSearch = it.take(100) }, Modifier.fillMaxWidth().testTag("digital-buyer-search"), shape = RoundedCornerShape(8.dp), label = { Text(l(language, "Find saved buyer", "Cari pembeli tersimpan")) }, leadingIcon = { PadIcon("search", tint = SalesSecondary) }, singleLine = true)
-                val matches = customers.filter { it.name.contains(buyerSearch.trim(), true) || it.phone.contains(buyerSearch.trim(), true) || it.meterNumber.contains(buyerSearch.trim(), true) }.take(5)
-                matches.forEach { buyer ->
-                    TextButton(onClick = {
-                        customerId = buyer.id
-                        buyerName = buyer.name
-                        destination = if (electricity) buyer.meterNumber else buyer.phone
-                    }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("digital-buyer-${buyer.id}"), colors = ButtonDefaults.textButtonColors(contentColor = SalesInk)) {
-                        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text(buyer.name, fontWeight = if (customerId == buyer.id) FontWeight.Bold else FontWeight.Normal)
-                            val details = listOf(buyer.phone, buyer.meterNumber).filter { it.isNotBlank() }.joinToString(" · ")
-                            if (details.isNotBlank()) Text(details, style = MaterialTheme.typography.bodySmall, color = SalesSecondary)
+                OutlinedTextField(buyerSearch, { buyerSearch = it.take(100); showBuyers = true }, Modifier.fillMaxWidth().testTag("digital-buyer-search"), shape = RoundedCornerShape(8.dp), label = { Text(l(language, "Find saved buyer", "Cari pembeli tersimpan")) }, leadingIcon = { PadIcon("search", tint = SalesSecondary) }, singleLine = true)
+                if (showBuyers) {
+                    val matches = remember(customers, buyerSearch) {
+                        val query = buyerSearch.trim()
+                        customers.asSequence().filter { it.name.contains(query, true) || it.phone.contains(query, true) || it.meterNumber.contains(query, true) }.take(4).toList()
+                    }
+                    if (matches.isNotEmpty()) Surface(Modifier.fillMaxWidth().testTag("digital-buyer-results"), shape = RoundedCornerShape(8.dp), color = SalesSurface, border = BorderStroke(1.dp, SalesBorder)) {
+                        Column {
+                            matches.take(3).forEachIndexed { index, buyer ->
+                                if (index > 0) HorizontalDivider(color = SalesBorder)
+                                Row(Modifier.fillMaxWidth().clickable(role = Role.Button) {
+                                    customerId = buyer.id
+                                    buyerName = buyer.name
+                                    destination = if (electricity) buyer.meterNumber else buyer.phone
+                                    showBuyers = false
+                                }.heightIn(min = 48.dp).testTag("digital-buyer-${buyer.id}").padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                        Text(buyer.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium, color = SalesInk, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                        val details = if (electricity) buyer.meterNumber else buyer.phone
+                                        if (details.isNotBlank()) Text(details, style = MaterialTheme.typography.bodySmall, color = SalesSecondary, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                    }
+                                    PadIcon("chevron", Modifier.size(16.dp), SalesSecondary)
+                                }
+                            }
                         }
                     }
+                    if (matches.size > 3) Text(l(language, "Showing 3 buyers. Search to narrow results.", "Menampilkan 3 pembeli. Cari untuk mempersempit hasil."), color = SalesSecondary, style = MaterialTheme.typography.bodySmall)
+                    if (matches.isEmpty()) Text(if (customers.isEmpty()) l(language, "No saved buyers. Enter details below.", "Belum ada pembeli. Isi data di bawah.") else l(language, "No matching buyers. Try another search or enter details below.", "Pembeli tidak ditemukan. Coba pencarian lain atau isi data di bawah."), color = SalesSecondary, style = MaterialTheme.typography.bodySmall)
+                } else {
+                    TextButton(onClick = { showBuyers = true }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("digital-change-buyer")) {
+                        Text(l(language, "Choose another buyer", "Pilih pembeli lain"))
+                    }
                 }
-                if (matches.isEmpty()) Text(l(language, "No saved buyers. Enter details below.", "Belum ada pembeli. Isi data di bawah."), color = SalesSecondary, style = MaterialTheme.typography.bodySmall)
                 OutlinedTextField(buyerName, { buyerName = it.take(100); customerId = null }, Modifier.fillMaxWidth().testTag("digital-buyer-name"), shape = RoundedCornerShape(8.dp), label = { Text(if (electricity) l(language, "Customer name", "Nama pelanggan") else l(language, "Customer name (optional)", "Nama pelanggan (opsional)")) }, supportingText = { if (electricity) Text(l(language, "Required", "Wajib diisi")) }, singleLine = true)
                 OutlinedTextField(destination, { destination = it.take(64); customerId = null }, Modifier.fillMaxWidth().testTag("digital-destination"), shape = RoundedCornerShape(8.dp), label = { Text(if (electricity) l(language, "Meter / customer ID", "Nomor meter / ID pelanggan") else l(language, "Destination", "Tujuan")) }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone), singleLine = true, supportingText = { if (needsDestination) Text(l(language, "Required: 3–64 characters; digits and phone punctuation only.", "Wajib: 3–64 karakter; hanya angka dan tanda baca telepon.")) })
                 if (electricity) OutlinedTextField(kwh, { kwh = it.take(20) }, Modifier.fillMaxWidth().testTag("digital-kwh"), shape = RoundedCornerShape(8.dp), label = { Text(l(language, "Energy (kWh)", "Energi (kWh)")) }, supportingText = { Text(l(language, "Required: 0–1,000,000, greater than zero; up to 3 decimals.", "Wajib: 0–1.000.000, lebih dari nol; maksimal 3 desimal.")) }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true, isError = kwh.isNotBlank() && !validKwh)

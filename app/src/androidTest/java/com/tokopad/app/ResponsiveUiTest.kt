@@ -85,11 +85,13 @@ class ResponsiveUiTest {
         val product = Product(id = 1, name = "PLN 50,000", price = 50_000, kind = ProductKind.ELECTRICITY)
         showNarrowScreen {
             CheckoutScreen(
-                products = listOf(product), customers = emptyList(), cart = emptyList(),
+                products = listOf(product), customers = (1L..6L).map { Customer(id = it, name = "Long buyer name $it", meterNumber = "12345678901") }, cart = emptyList(),
                 language = "en", busy = false, onCart = {}, onComplete = { _, _, _, _ -> },
             )
         }
         compose.onNodeWithText(product.name).performScrollTo().assertIsDisplayed().performClick()
+        compose.onNodeWithTag("digital-buyer-3").performScrollTo().assertIsDisplayed().performClick()
+        compose.onNodeWithTag("digital-buyer-results").assertDoesNotExist()
         listOf("digital-buyer-search", "digital-buyer-name", "digital-destination", "digital-kwh", "digital-code")
             .forEach { tag -> compose.onNodeWithTag(tag).performScrollTo().assertIsDisplayed() }
         compose.onNodeWithText("Add").assertIsDisplayed().assertHasClickAction()
@@ -98,6 +100,16 @@ class ResponsiveUiTest {
         compose.onNodeWithTag("checkout-cart").assertIsDisplayed().performClick().assertIsSelected()
         compose.onNodeWithTag("checkout-products").assertIsDisplayed().performClick().assertIsSelected()
         compose.onNodeWithText(product.name).performScrollTo().assertIsDisplayed()
+    }
+
+    @Test fun loading_largeFonts_indicatorAndLabelCenteredInDialog() {
+        showNarrowScreen { BusyDialog("id") }
+        val dialog = compose.onNodeWithTag("busy-dialog").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+        val progress = compose.onNodeWithTag("busy-progress").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+        val label = compose.onNodeWithTag("busy-label").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+        assertEquals(dialog.center.x, progress.center.x, 1f)
+        assertEquals(dialog.center.x, label.center.x, 1f)
+        assertEquals(progress.top - dialog.top, dialog.bottom - label.bottom, 1f)
     }
 
     @Test fun indonesianSettingsTabsFillWidthEvenlyAndLanguageUsesSelection() {

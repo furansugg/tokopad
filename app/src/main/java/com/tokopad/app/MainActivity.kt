@@ -32,6 +32,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -370,12 +371,19 @@ private fun Tokopad() {
             if (history.isEmpty()) Text(l(lang, "No transactions yet.", "Belum ada transaksi."))
             history.forEach { sale -> TextButton(onClick = { customerHistory = null; selectedSale = sale }) { Text("${sale.receiptNumber}\n${money(sale.total, lang)}" + if (sale.cancelledAt != null) " · " + l(lang, "Cancelled", "Dibatalkan") else "") } }
         } }, confirmButton = { TextButton(onClick = { customerHistory = null }) { Text(l(lang, "Close", "Tutup")) } }) }
-    if (busy) Dialog(onDismissRequest = {}, properties = DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false)) {
-        Surface(shape = MaterialTheme.shapes.large) { Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            CircularProgressIndicator()
-            Text(l(lang, "Working…", "Sedang diproses…"))
-        } }
+    if (busy) BusyDialog(lang)
     }
+}
+
+@Composable
+internal fun BusyDialog(language: String) {
+    Dialog(onDismissRequest = {}, properties = DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false)) {
+        Surface(Modifier.fillMaxWidth().testTag("busy-dialog"), shape = MaterialTheme.shapes.large) {
+            Column(Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                CircularProgressIndicator(Modifier.testTag("busy-progress"))
+                Text(l(language, "Working…", "Sedang diproses…"), Modifier.testTag("busy-label"), textAlign = TextAlign.Center)
+            }
+        }
     }
 }
 

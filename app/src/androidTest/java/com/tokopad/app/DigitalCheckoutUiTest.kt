@@ -75,6 +75,26 @@ class DigitalCheckoutUiTest {
     }
 
     @Test
+    fun buyerResults_compact_searchFindsBeyondPreview_selectionCollapsesAndCanReopen() {
+        val customers = (1L..8L).map { buyer.copy(id = it, name = "Buyer $it", meterNumber = "1234567800$it") }
+        showCheckout(customers = customers)
+        compose.onNodeWithTag("digital-buyer-3").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("digital-buyer-4").assertDoesNotExist()
+        compose.onNodeWithText("Showing 3 buyers. Search to narrow results.").performScrollTo().assertIsDisplayed()
+        replace("digital-buyer-search", "Buyer 8")
+        compose.onNodeWithTag("digital-buyer-8").performScrollTo().performClick()
+        compose.onNodeWithTag("digital-buyer-results").assertDoesNotExist()
+        compose.onNodeWithTag("digital-buyer-name").performScrollTo().assertTextContains("Buyer 8")
+        compose.onNodeWithTag("digital-destination").performScrollTo().assertTextContains("12345678008")
+        compose.onNodeWithTag("digital-change-buyer").performScrollTo().performClick()
+        compose.onNodeWithTag("digital-buyer-8").performScrollTo().assertIsDisplayed()
+        replace("digital-buyer-search", "not found")
+        compose.onNodeWithTag("digital-buyer-results").assertDoesNotExist()
+        compose.onNodeWithText("No matching buyers. Try another search or enter details below.").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("digital-buyer-name").performScrollTo().assertTextContains("Buyer 8")
+    }
+
+    @Test
     fun manualBuyer_requiresNameMeterPositiveKwh_keepsCustomerUnsavedUntilCheckout() {
         val customers = listOf(buyer)
         showCheckout(customers = customers)

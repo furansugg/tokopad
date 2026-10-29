@@ -9,6 +9,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performTextReplacement
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.After
@@ -30,6 +31,7 @@ class AppSmokeTest {
                 store.saveProduct(Product(name = "Internet 10 GB", price = 35000, kind = ProductKind.DATA, provider = "Telkomsel", packageName = "10 GB / 30 days"))
                 val electricity = Product(name = "Electricity 50K", price = 52000, kind = ProductKind.ELECTRICITY, nominal = 50000, requiresCode = true).let { it.copy(id = store.saveProduct(it)) }
                 val customer = Customer(name = "Nadia Putri", phone = "081234567890", meterNumber = "12345678901").let { it.copy(id = store.saveCustomer(it)) }
+                (1..5).forEach { store.saveCustomer(Customer(name = "PLN buyer $it", meterNumber = "1234567800$it")) }
                 store.checkout(listOf(CartLine(notebook, 2)), customer, 0, "cash", 50000)
                 store.checkout(listOf(CartLine(notebook)), null, 0, "noncash", 18000)
                 electricityReceipt = store.checkout(listOf(CartLine(electricity, destination = customer.meterNumber,
@@ -73,6 +75,9 @@ class AppSmokeTest {
         screenshot("checkout")
         compose.onNodeWithText("Electricity 50K").performClick()
         screenshot("checkout-pln")
+        compose.onNodeWithTag("digital-buyer-search").performTextReplacement("Nadia")
+        compose.onNodeWithText("Nadia Putri").performScrollTo().performClick()
+        screenshot("checkout-pln-selected")
         compose.onNodeWithText("Cancel").performClick()
         compose.onNodeWithText("Pocket notebook").performClick()
         compose.onNodeWithText("Add").performClick()
@@ -109,6 +114,10 @@ class AppSmokeTest {
         compose.onNodeWithTag("nav-dashboard").performClick()
         waitForText("Overview")
         screenshot("home-dark")
+        compose.onNodeWithTag("nav-checkout").performClick()
+        compose.onNodeWithText("Electricity 50K").performClick()
+        screenshot("checkout-pln-dark")
+        compose.onNodeWithText("Cancel").performClick()
         navigate("Settings")
         compose.onNodeWithText("Light", useUnmergedTree = true).performScrollTo().performClick()
         compose.onNodeWithText("Save settings").performClick()
