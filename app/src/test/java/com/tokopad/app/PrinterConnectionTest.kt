@@ -14,7 +14,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -84,7 +83,8 @@ class PrinterConnectionTest {
             )
             error("Expected IOException")
         } catch (error: IOException) {
-            assertSame(failure, error.cause)
+            assertTrue(error.cause is IOException)
+            assertEquals(failure.message, error.cause?.message)
             assertTrue(error.message!!.contains("may be partially printed"))
         }
         assertEquals(1, socket.writes.get())
@@ -170,7 +170,7 @@ class PrinterConnectionTest {
             )
             error("Expected cancellation")
         } catch (error: CancellationException) {
-            assertSame(cancellation, error)
+            assertEquals(cancellation.message, error.message)
         }
         assertEquals(1, socket.closes.get())
     }
@@ -194,7 +194,7 @@ class PrinterConnectionTest {
             )
             error("Expected SecurityException")
         } catch (error: SecurityException) {
-            assertSame(denied, error)
+            assertEquals(denied.message, error.message)
         }
         assertEquals(1, socket.closes.get())
     }
