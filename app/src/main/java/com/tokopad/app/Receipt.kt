@@ -271,7 +271,7 @@ object Receipt {
     )
 
     suspend fun print(context: Context, address: String, sale: Sale, settings: ShopSettings) =
-        send(context, address, bytes(sale, settings))
+        withContext(Dispatchers.IO) { send(context, address, bytes(sale, settings)) }
 
     suspend fun printTest(context: Context, settings: ShopSettings) =
         print(context, settings.printerAddress, testSale(settings), settings)

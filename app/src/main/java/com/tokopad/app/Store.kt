@@ -170,8 +170,10 @@ class Store(context: Context) : java.io.Closeable {
             val selected = snapshots.map { line -> line.customerId?.let {
                 findCustomer(db, it) ?: throw IllegalArgumentException("Customer no longer exists")
             } }
-            val buyers = db.query("customers", null, null, null, null, null, "id").use { c ->
-                buildList { while (c.moveToNext()) add(customer(c)) }.toMutableList()
+            val buyers by lazy {
+                db.query("customers", null, null, null, null, null, "id").use { c ->
+                    buildList { while (c.moveToNext()) add(customer(c)) }.toMutableList()
+                }
             }
             fun saveBuyer(buyer: Customer): Customer {
                 validateCustomer(buyer, allowNew = true)
