@@ -11,6 +11,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
@@ -21,6 +22,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -564,28 +566,31 @@ fun SettingsScreen(
     ) {
         SectionHeading(l(language, "Settings", "Pengaturan"),
             l(language, "Store, receipts and connections.", "Toko, nota, dan koneksi."))
-        Row(Modifier.fillMaxWidth().background(managementMuted, RoundedCornerShape(8.dp))
+        BoxWithConstraints(Modifier.fillMaxWidth().background(managementMuted, RoundedCornerShape(8.dp))
             .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(8.dp))
-            .horizontalScroll(rememberScrollState()).selectableGroup().padding(4.dp),
-            horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-            listOf(
-                "general" to l(language, "General", "Umum"),
-                "receipt" to l(language, "Receipt", "Nota"),
-                "printer" to "Printer",
-                "data" to "Data",
-            ).forEach { (id, label) ->
-                val selected = currentSection == id
-                TextButton(
-                    onClick = { onSection(id) },
-                    modifier = Modifier.heightIn(min = 48.dp).testTag("settings-$id")
-                        .semantics { this.selected = selected; role = Role.Tab },
-                    shape = RoundedCornerShape(8.dp),
-                    contentPadding = PaddingValues(horizontal = 16.dp),
-                    colors = ButtonDefaults.textButtonColors(
-                        containerColor = if (selected) managementSurface else Color.Transparent,
-                        contentColor = if (selected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
-                    ),
-                ) { Text(label, style = MaterialTheme.typography.labelMedium, maxLines = 1) }
+            .padding(4.dp)) {
+            val tabWidth = (maxWidth - 6.dp) / 4
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).selectableGroup(),
+                horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                listOf(
+                    "general" to l(language, "General", "Umum"),
+                    "receipt" to l(language, "Receipt", "Nota"),
+                    "printer" to "Printer",
+                    "data" to "Data",
+                ).forEach { (id, label) ->
+                    val selected = currentSection == id
+                    TextButton(
+                        onClick = { onSection(id) },
+                        modifier = Modifier.widthIn(min = tabWidth).heightIn(min = 48.dp).testTag("settings-$id")
+                            .semantics { this.selected = selected; role = Role.Tab },
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp),
+                        colors = ButtonDefaults.textButtonColors(
+                            containerColor = if (selected) managementSurface else Color.Transparent,
+                            contentColor = if (selected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+                        ),
+                    ) { Text(label, style = MaterialTheme.typography.labelMedium, maxLines = 1) }
+                }
             }
         }
         key(currentSection) {
@@ -605,13 +610,9 @@ fun SettingsScreen(
                             }
                         }
                         SettingsGroup(l(language, "Language", "Bahasa"), "settings") {
-                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                OutlinedButton(onClick = { draft = draft.copy(language = "en") },
-                                    enabled = language != "en", shape = RoundedCornerShape(8.dp),
-                                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("English") }
-                                OutlinedButton(onClick = { draft = draft.copy(language = "id") },
-                                    enabled = language != "id", shape = RoundedCornerShape(8.dp),
-                                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Indonesian") }
+                            Column(Modifier.selectableGroup()) {
+                                ManagementChoice("English", language == "en") { draft = draft.copy(language = "en") }
+                                ManagementChoice("Bahasa Indonesia", language == "id") { draft = draft.copy(language = "id") }
                             }
                         }
                         SettingsGroup(l(language, "Store details", "Detail toko"), "home") {

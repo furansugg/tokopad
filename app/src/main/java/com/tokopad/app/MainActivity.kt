@@ -17,6 +17,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.SystemBarStyle
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -36,6 +37,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -280,8 +282,8 @@ private fun Tokopad() {
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding).imePadding()) {
             Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).padding(horizontal = 16.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Box(Modifier.size(28.dp).background(MaterialTheme.colorScheme.primary, RoundedCornerShape(6.dp)), contentAlignment = Alignment.Center) {
-                    PadIcon("receipt", Modifier.size(17.dp), MaterialTheme.colorScheme.onPrimary)
+                Surface(shape = RoundedCornerShape(6.dp), color = Color.White) {
+                    Image(painterResource(R.drawable.ic_launcher_monochrome), contentDescription = null, modifier = Modifier.size(28.dp))
                 }
                 Column(Modifier.weight(1f)) {
                     Text(settings.shopName, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)

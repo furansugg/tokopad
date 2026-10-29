@@ -29,6 +29,8 @@ Printed receipts use short `TP-00000001` transaction numbers, not the internal c
 
 ## Interface
 
+Launcher and header use a lightweight vector interpretation of the supplied Tokopad mark, including adaptive/themed launcher support. Settings tabs fill the available width at normal text sizes and remain scrollable with larger fonts. Theme and language choices both use accessible radio selection.
+
 Japanese and other non-ASCII receipt lines are rendered using Android fonts and printed as monochrome ESC/POS raster images; ASCII lines keep the lightweight text path. Printer code-page/Japanese-font support is not required, but raster printing must be supported. Glyph coverage depends on Android's installed fonts; raster-heavy receipts send more data and may print slower. No fonts are downloaded.
 
 The native Compose interface follows [shadcn/ui](https://ui.shadcn.com/docs/components) visual references: zinc neutrals, thin borders, restrained corners, compact tables, segmented tabs, and clear primary actions. No React/WebView runtime or shadcn package is embedded. Light/dark colors follow the saved choice or Android system theme. Checkout separates product selection from the cart/payment step; digital buyer details belong to each line. Settings separate General, Receipt, Printer, and Data rather than one long form.

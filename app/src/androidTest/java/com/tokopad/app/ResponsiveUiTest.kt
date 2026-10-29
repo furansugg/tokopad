@@ -22,6 +22,7 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 
@@ -96,5 +97,32 @@ class ResponsiveUiTest {
         compose.onNodeWithTag("checkout-cart").assertIsDisplayed().performClick().assertIsSelected()
         compose.onNodeWithTag("checkout-products").assertIsDisplayed().performClick().assertIsSelected()
         compose.onNodeWithText(product.name).performScrollTo().assertIsDisplayed()
+    }
+
+    @Test fun indonesianSettingsTabsFillWidthEvenlyAndLanguageUsesSelection() {
+        val settings = mutableStateOf(ShopSettings(language = "id"))
+        compose.setContent {
+            TokopadTheme {
+                Box(Modifier.width(360.dp).height(640.dp)) {
+                    SettingsScreen(
+                        settings = settings.value, printers = emptyList(), onSave = { settings.value = it },
+                        onFindPrinters = {}, onTestPrint = {}, onExport = {}, onImport = {},
+                        onSelectPrinter = {}, onConnectPrinter = {}, onOpenBluetooth = {},
+                        printerStatus = "", section = "general", onSection = {},
+                    )
+                }
+            }
+        }
+        val tabs = listOf("general", "receipt", "printer", "data").map {
+            compose.onNodeWithTag("settings-$it").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+        }
+        tabs.forEach { assertEquals(tabs.first().width, it.width, 1f) }
+        val density = compose.density.density
+        assertEquals(20f * density, tabs.first().left, 1f)
+        assertEquals(340f * density, tabs.last().right, 1f)
+        compose.onNodeWithText("Bahasa Indonesia").performScrollTo().assertIsSelected()
+        compose.onNodeWithText("English").performScrollTo().performClick().assertIsSelected()
+        compose.runOnIdle { assertEquals("id", settings.value.language) }
+        assertTrue(tabs.zipWithNext().all { (left, right) -> right.left >= left.right })
     }
 }

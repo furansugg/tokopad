@@ -2,7 +2,7 @@ package com.tokopad.app
 
 import android.graphics.Bitmap
 import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
@@ -94,7 +94,7 @@ class AppSmokeTest {
 
         navigate("Settings")
         compose.onNodeWithText("Settings").assertIsDisplayed()
-        compose.onNodeWithText("English").assertIsNotEnabled()
+        compose.onNodeWithText("English").assertIsSelected()
         screenshot("settings")
 
         compose.onNodeWithTag("settings-printer").performClick()
@@ -114,7 +114,7 @@ class AppSmokeTest {
         compose.onNodeWithText("Save settings").performClick()
         waitForText("Settings")
 
-        compose.onNodeWithText("Indonesian").performScrollTo().performClick()
+        compose.onNodeWithText("Bahasa Indonesia").performScrollTo().performClick()
         compose.onNodeWithText("Simpan pengaturan").performClick()
         waitForText("Pengaturan")
 
