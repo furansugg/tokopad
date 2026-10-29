@@ -125,6 +125,18 @@ class DigitalCheckoutUiTest {
     }
 
     @Test
+    fun savedBuyerDestinations_acceptStoredPhonePunctuationAndShortMeter() {
+        val formatted = buyer.copy(meterNumber = "123")
+        showCheckout(customers = listOf(formatted))
+        compose.onNodeWithTag("digital-buyer-${buyer.id}").performScrollTo().performClick()
+        replace("digital-kwh", "1")
+        compose.onNodeWithText("Add").assertIsEnabled()
+        replace("digital-destination", "0812(345).678")
+        compose.onNodeWithText("Add").assertIsEnabled().performClick()
+        compose.runOnIdle { assertEquals("0812(345).678", cart.value.single().destination) }
+    }
+
+    @Test
     fun configuredTokenRequired_beforeAdd() {
         showCheckout(product = electricity.copy(requiresCode = true))
         compose.onNodeWithTag("digital-buyer-${buyer.id}").performScrollTo().performClick()

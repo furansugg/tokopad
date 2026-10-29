@@ -40,7 +40,7 @@ internal object PrinterConnection {
             currentCoroutineContext().ensureActive()
             try {
                 withTimeout(15_000) {
-                    // Let the printer wake up, then keep SPP open while its receive buffer drains.
+                    // ponytail: fixed warmup/drain for Classic SPP; use model-specific status ACKs if hardware tests require them.
                     pause(300)
                     currentCoroutineContext().ensureActive()
                     blocking(socket, write)

@@ -143,6 +143,80 @@ class StoreTest {
         assertEquals(2, store.customers().size)
     }
 
+    @Test fun customerHistoryIncludesEveryRecipientAndPayerAcrossDeletionAndRestore() {
+        val product = digital(ProductKind.DATA)
+        val lines = listOf(
+            CartLine(product, destination = "08111111", buyerName = "Alice"),
+            CartLine(product, destination = "08222222", buyerName = "Bob"),
+        )
+        val sale = store.checkout(lines + lines.first(), Customer(name = "Payer"), 0, "cash", 300)
+        val alice = sale.lines[0].customerId!!
+        val bob = sale.lines[1].customerId!!
+        val payer = sale.customerId!!
+        val unrelated = store.saveCustomer(Customer(name = "Unrelated"))
+        assertEquals(3, setOf(alice, bob, payer).size)
+        for (id in listOf(alice, bob, payer)) assertEquals(listOf(sale), store.salesForCustomer(id))
+        assertTrue(store.salesForCustomer(unrelated).isEmpty())
+        store.restoreBackup(store.exportBackup())
+        for (id in listOf(alice, bob, payer)) assertEquals(listOf(sale), store.salesForCustomer(id))
+
+        store.deleteCustomer(alice)
+        store.deleteCustomer(payer)
+        val receipt = store.sale(sale.id)
+        assertEquals(sale.copy(customerId = null), receipt)
+        assertEquals(alice, receipt.lines[0].customerId)
+        assertTrue(store.salesForCustomer(alice).isEmpty())
+        assertTrue(store.salesForCustomer(payer).isEmpty())
+        assertEquals(listOf(receipt), store.salesForCustomer(bob))
+        val backup = store.exportBackup()
+        repeat(2) { // Replacement must cascade old links before rebuilding them.
+            store.restoreBackup(backup)
+            assertEquals(receipt, store.sale(sale.id))
+            assertTrue(store.salesForCustomer(alice).isEmpty())
+            assertTrue(store.salesForCustomer(payer).isEmpty())
+            assertEquals(listOf(receipt), store.salesForCustomer(bob))
+        }
+        context.openOrCreateDatabase("tokopad.db", Context.MODE_PRIVATE, null).use { db ->
+            db.rawQuery("SELECT COUNT(*) FROM sale_customers", null).use { c -> c.moveToFirst(); assertEquals(1L, c.getLong(0)) }
+            db.rawQuery("PRAGMA foreign_key_check", null).use { assertFalse(it.moveToFirst()) }
+        }
+    }
+
+    @Test fun versionOneMigrationBackfillsAllBuyersButNotDeletedSnapshots() {
+        val product = digital(ProductKind.PULSA)
+        val lines = listOf(
+            CartLine(product, destination = "08111111", buyerName = "Alice"),
+            CartLine(product, destination = "08222222", buyerName = "Bob"),
+        )
+        val implicit = store.checkout(lines, null, 0, "cash", 200)
+        val explicit = store.checkout(lines, Customer(name = "Payer"), 0, "cash", 200)
+        val deleted = implicit.lines[0].customerId!!
+        val remaining = implicit.lines[1].customerId!!
+        val payer = explicit.customerId!!
+        store.deleteCustomer(deleted)
+        val before = store.exportBackup()
+        store.close()
+        context.openOrCreateDatabase("tokopad.db", Context.MODE_PRIVATE, null).use { db ->
+            db.execSQL("DROP TABLE sale_customers")
+            db.version = 1
+        }
+        store = Store(context)
+        val expected = listOf(explicit, implicit.copy(customerId = null))
+            .sortedWith(compareByDescending<Sale> { it.createdAt }.thenByDescending { it.id })
+        assertEquals(expected, store.salesForCustomer(remaining))
+        assertEquals(listOf(explicit), store.salesForCustomer(payer))
+        assertTrue(store.salesForCustomer(deleted).isEmpty())
+        assertEquals(before, store.exportBackup())
+        store.close()
+        store = Store(context)
+        assertEquals(expected, store.salesForCustomer(remaining))
+        context.openOrCreateDatabase("tokopad.db", Context.MODE_PRIVATE, null).use { db ->
+            assertEquals(2, db.version)
+            db.rawQuery("SELECT COUNT(*) FROM sale_customers", null).use { c -> c.moveToFirst(); assertEquals(3L, c.getLong(0)) }
+            db.rawQuery("PRAGMA foreign_key_check", null).use { assertFalse(it.moveToFirst()) }
+        }
+    }
+
     @Test fun themeLogoAndBuyerFieldsRoundTripWithHistoricalShopSnapshot() {
         val settings = ShopSettings(theme = "dark", headerMode = "both", logo = logo())
         store.saveSettings(settings)
@@ -228,6 +302,18 @@ class StoreTest {
             }
         }
         rejected { store.restoreBackup(editedBackup { it.getJSONArray("customers").getJSONObject(0).put("meterNumber", 12345678) }) }
+        assertEquals(original, store.exportBackup())
+        assertEquals(sale, store.sale(sale.id))
+    }
+
+    @Test fun truncatedPngBackupRejectsBeforeReplacingData() {
+        val product = product()
+        val sale = store.checkout(listOf(CartLine(product)), null, 0, "cash", 100)
+        val original = store.exportBackup()
+        val truncated = Base64.getEncoder().encodeToString(Base64.getDecoder().decode(logo()).copyOf(33))
+        rejected { store.saveSettings(ShopSettings(logo = truncated)) }
+        rejected { store.restoreBackup(editedBackup { it.getJSONObject("settings").put("logo", truncated) }) }
+        rejected { store.restoreBackup(editedBackup { it.getJSONArray("sales").getJSONObject(0).getJSONObject("shop").put("logo", truncated) }) }
         assertEquals(original, store.exportBackup())
         assertEquals(sale, store.sale(sale.id))
     }

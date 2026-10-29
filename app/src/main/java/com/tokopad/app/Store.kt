@@ -6,6 +6,7 @@ import android.database.Cursor
 import android.database.sqlite.SQLiteConstraintException
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
+import android.graphics.BitmapFactory
 import org.json.JSONArray
 import org.json.JSONObject
 import java.security.MessageDigest
@@ -15,7 +16,7 @@ import java.util.UUID
 
 /** Synchronous; call on an IO thread. Amounts are whole rupiah. */
 class Store(context: Context) : java.io.Closeable {
-    private val helper = object : SQLiteOpenHelper(context.applicationContext, "tokopad.db", null, 1) {
+    private val helper = object : SQLiteOpenHelper(context.applicationContext, "tokopad.db", null, 2) {
         override fun onConfigure(db: SQLiteDatabase) { db.setForeignKeyConstraintsEnabled(true) }
 
         override fun onCreate(db: SQLiteDatabase) {
@@ -25,6 +26,7 @@ class Store(context: Context) : java.io.Closeable {
             db.execSQL("CREATE TABLE sales (id INTEGER PRIMARY KEY AUTOINCREMENT, number TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL, total INTEGER NOT NULL CHECK(total >= 0), customer_id INTEGER REFERENCES customers(id) ON DELETE SET NULL, cancelled_at INTEGER, cancellation_reason TEXT NOT NULL DEFAULT '', data TEXT NOT NULL)")
             db.execSQL("CREATE INDEX sales_created_at ON sales(created_at)")
             db.execSQL("CREATE INDEX sales_customer_id ON sales(customer_id)")
+            createSaleCustomers(db)
             // ponytail: sum(UTF-8 data bytes + 256/row) <= 28 MiB keeps escaped backups below 64 MiB; raise only with the backup ceiling.
             db.execSQL("CREATE TABLE storage_budget (id INTEGER PRIMARY KEY CHECK(id = 1), bytes INTEGER NOT NULL CONSTRAINT storage_budget_limit CHECK(bytes BETWEEN 0 AND $MAX_STORAGE_BYTES))")
             db.execSQL("INSERT INTO storage_budget (id, bytes) VALUES (1, 0)")
@@ -36,11 +38,33 @@ class Store(context: Context) : java.io.Closeable {
         }
 
         override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-            error("Unsupported database version: $oldVersion to $newVersion")
+            check(oldVersion == 1 && newVersion == 2) { "Unsupported database version: $oldVersion to $newVersion" }
+            createSaleCustomers(db)
+            db.query("sales", null, null, null, null, null, "id").use { c ->
+                while (c.moveToNext()) linkSaleCustomers(db, sale(c))
+            }
         }
     }
 
     override fun close() = helper.close()
+
+    private fun createSaleCustomers(db: SQLiteDatabase) {
+        db.execSQL("CREATE TABLE sale_customers (sale_id INTEGER NOT NULL REFERENCES sales(id) ON DELETE CASCADE, customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE, PRIMARY KEY(sale_id, customer_id))")
+        db.execSQL("CREATE INDEX sale_customers_customer_id ON sale_customers(customer_id, sale_id)")
+    }
+
+    private fun linkSaleCustomers(db: SQLiteDatabase, sale: Sale) {
+        val ids = sale.lines.mapNotNull { it.customerId }.toMutableSet()
+        sale.customerId?.let { ids.add(it) }
+        // Deleted buyers remain receipt snapshots, never live profile links.
+        db.compileStatement("INSERT OR IGNORE INTO sale_customers (sale_id, customer_id) SELECT ?, id FROM customers WHERE id = ?").use { statement ->
+            statement.bindLong(1, sale.id)
+            for (id in ids) {
+                statement.bindLong(2, id)
+                statement.executeInsert()
+            }
+        }
+    }
 
     private inline fun <T> transaction(block: (SQLiteDatabase) -> T): T {
         val db = helper.writableDatabase
@@ -211,7 +235,7 @@ class Store(context: Context) : java.io.Closeable {
             val id = db.insertOrThrow("sales", null, saleValues(sale).apply {
                 put("data", saleJson(sale).put("checkoutSignature", signature).toString())
             }).also { validId(it) }
-            sale.copy(id = id)
+            sale.copy(id = id).also { linkSaleCustomers(db, it) }
         }
     }
 
@@ -232,7 +256,7 @@ class Store(context: Context) : java.io.Closeable {
     fun salesForCustomer(customerId: Long): List<Sale> {
         validId(customerId)
         return helper.readableDatabase.query(
-            "sales", null, "customer_id = ?", arrayOf(customerId.toString()),
+            "sales", null, "id IN (SELECT sale_id FROM sale_customers WHERE customer_id = ?)", arrayOf(customerId.toString()),
             null, null, "created_at DESC, id DESC", "500",
         ).use { c -> buildList { while (c.moveToNext()) add(sale(c)) } }
     }
@@ -300,10 +324,13 @@ class Store(context: Context) : java.io.Closeable {
             for (c in data.customers) db.insertOrThrow("customers", null, ContentValues().apply {
                 put("id", c.id); put("data", customerJson(c).toString())
             })
-            for (s in data.sales) db.insertOrThrow("sales", null, saleValues(s).apply {
-                put("id", s.id)
-                data.signatures[s.id]?.let { put("data", saleJson(s).put("checkoutSignature", it).toString()) }
-            })
+            for (s in data.sales) {
+                db.insertOrThrow("sales", null, saleValues(s).apply {
+                    put("id", s.id)
+                    data.signatures[s.id]?.let { put("data", saleJson(s).put("checkoutSignature", it).toString()) }
+                })
+                linkSaleCustomers(db, s)
+            }
             writeSettings(db, data.settings.copy(printerAddress = ""))
         }
     }
@@ -487,6 +514,7 @@ class Store(context: Context) : java.io.Closeable {
                 require(bytes.take(16) == listOf(137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82).map { it.toByte() }) { "Logo must have a PNG IHDR header" }
                 fun dimension(offset: Int): Long = (offset until offset + 4).fold(0L) { value, i -> (value shl 8) or (bytes[i].toLong() and 255) }
                 require(dimension(16) in 1L..384L && dimension(20) in 1L..192L) { "Logo exceeds 384x192 pixels" }
+                requireNotNull(BitmapFactory.decodeByteArray(bytes, 0, bytes.size)) { "Logo must be a decodable PNG" }.recycle()
             }
         }
         private fun validateDestination(value: String) {
