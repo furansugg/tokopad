@@ -78,29 +78,27 @@ private fun DateRange(language: String, from: Long, to: Long, onRange: (Long, Lo
 
 @Composable
 fun DashboardScreen(data: Dashboard, sales: List<Sale>, language: String, from: Long, to: Long, onRange: (Long, Long) -> Unit, onCheckout: () -> Unit, onSale: (Sale) -> Unit) {
-    LazyColumn(Modifier.fillMaxSize().background(SalesCream), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
-        item { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(l(language, "OVERVIEW", "RINGKASAN"), color = SalesForest, style = MaterialTheme.typography.labelSmall, letterSpacing = 2.sp)
-            Text(l(language, "A little overview", "Sekilas toko kamu"), color = SalesInk, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
+    LazyColumn(Modifier.fillMaxSize().background(SalesCream), contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        item { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(l(language, "Overview", "Ringkasan"), Modifier.weight(1f), color = SalesInk, style = MaterialTheme.typography.headlineSmall)
+            DateRange(language, from, to, onRange)
         } }
-        item { DateRange(language, from, to, onRange) }
         item { Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp), color = SalesForest, contentColor = Color.White) {
-            Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                     Text(l(language, "Total sales", "Total penjualan"), color = Color.White.copy(alpha = .8f), style = MaterialTheme.typography.bodyMedium)
-                    Surface(shape = RoundedCornerShape(12.dp), color = SalesLime, contentColor = SalesForest) { PadIcon("receipt", Modifier.padding(10.dp).size(20.dp), SalesForest) }
+                    PadIcon("receipt", Modifier.size(20.dp), SalesLime)
                 }
                 Text(money(data.revenue, language), style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.SemiBold)
-                Spacer(Modifier.height(8.dp))
                 HorizontalDivider(color = Color.White.copy(alpha = .18f))
-                Row(Modifier.fillMaxWidth().padding(top = 8.dp)) {
+                Row(Modifier.fillMaxWidth().padding(top = 4.dp)) {
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                         Text(l(language, "Transactions", "Transaksi"), style = MaterialTheme.typography.labelMedium, color = Color.White.copy(alpha = .7f))
-                        Text("${data.count}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Medium)
+                        Text("${data.count}", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Medium)
                     }
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                         Text(l(language, "Average sale", "Rata-rata penjualan"), style = MaterialTheme.typography.labelMedium, color = Color.White.copy(alpha = .7f))
-                        Text(money(data.average, language), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Medium)
+                        Text(money(data.average, language), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Medium)
                     }
                 }
         } } }

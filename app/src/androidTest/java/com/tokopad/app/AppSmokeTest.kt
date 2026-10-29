@@ -47,8 +47,9 @@ class AppSmokeTest {
 
     @Test
     fun realLaunch_navigation_languageSwitch_andScreenshots() {
-        waitForText("A little overview")
-        compose.onNodeWithText("A little overview").assertIsDisplayed()
+        waitForText("Overview")
+        compose.onNodeWithText("Overview").assertIsDisplayed()
+        compose.onNodeWithText("New sale").assertIsDisplayed()
         compose.onNodeWithText("On device").assertIsDisplayed()
         listOf("Home", "Checkout", "History", "More").forEach { label ->
             compose.onNodeWithText(label).assertIsDisplayed()
@@ -84,8 +85,8 @@ class AppSmokeTest {
         waitForText("Pengaturan")
 
         navigate("Beranda")
-        waitForText("Sekilas toko kamu")
-        compose.onNodeWithText("Sekilas toko kamu").assertIsDisplayed()
+        waitForText("Ringkasan")
+        compose.onNodeWithText("Ringkasan").assertIsDisplayed()
     }
 
     private fun navigate(label: String) {
