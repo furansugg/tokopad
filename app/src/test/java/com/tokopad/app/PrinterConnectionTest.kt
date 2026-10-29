@@ -2,6 +2,7 @@ package com.tokopad.app
 
 import java.io.Closeable
 import java.io.IOException
+import java.util.Collections
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
@@ -10,6 +11,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -18,11 +20,12 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PrinterConnectionTest {
-    private class Socket : Closeable {
+    private class Socket(private val onClose: () -> Unit = {}) : Closeable {
         val closes = AtomicInteger()
         val writes = AtomicInteger()
         val closed = CountDownLatch(1)
         override fun close() {
+            onClose()
             closes.incrementAndGet()
             closed.countDown()
         }
@@ -196,6 +199,107 @@ class PrinterConnectionTest {
         } catch (error: SecurityException) {
             assertEquals(denied.message, error.message)
         }
+        assertEquals(1, socket.closes.get())
+    }
+
+    @Test fun connectWarmupWriteFlushDrainCloseAreOrderedWithoutRetry() = runBlocking {
+        val events = Collections.synchronizedList(mutableListOf<String>())
+        val socket = Socket { events += "close" }
+        PrinterConnection.use(
+            secure = { socket }, insecure = { error("Would duplicate receipt") },
+            connect = { events += "connect" },
+            write = {
+                assertEquals(0, it.closes.get())
+                it.writes.incrementAndGet()
+                events += "write"
+                events += "flush"
+            },
+            pause = { millis ->
+                assertEquals(0, socket.closes.get())
+                events += "pause:$millis"
+            },
+        )
+        assertEquals(listOf("connect", "pause:300", "write", "flush", "pause:500", "close"), events.toList())
+        assertEquals(1, socket.writes.get())
+        assertEquals(1, socket.closes.get())
+    }
+
+    @Test fun defaultWarmupAndDrainActuallyWaitBeforeWriteAndClose() = runBlocking {
+        var connectedAt = 0L
+        var flushedAt = 0L
+        var closedAt = 0L
+        var writtenAt = 0L
+        val socket = Socket { closedAt = System.nanoTime() }
+        PrinterConnection.use(
+            secure = { socket }, insecure = { error("Unexpected fallback") },
+            connect = { connectedAt = System.nanoTime() },
+            write = {
+                writtenAt = System.nanoTime()
+                it.writes.incrementAndGet()
+                flushedAt = System.nanoTime()
+            },
+        )
+        assertTrue("Warmup omitted", TimeUnit.NANOSECONDS.toMillis(writtenAt - connectedAt) >= 280)
+        assertTrue("Drain omitted", TimeUnit.NANOSECONDS.toMillis(closedAt - flushedAt) >= 480)
+        assertEquals(1, socket.writes.get())
+    }
+
+    @Test fun cancellationDuringWarmupClosesBeforeAnyWriteWithoutFallback() = runBlocking {
+        val socket = Socket()
+        val warming = CompletableDeferred<Unit>()
+        val job = launch {
+            PrinterConnection.use(
+                secure = { socket }, insecure = { error("Unexpected fallback") }, connect = {},
+                write = { it.writes.incrementAndGet(); Unit },
+                pause = {
+                    assertEquals(300L, it)
+                    warming.complete(Unit)
+                    awaitCancellation()
+                },
+            )
+        }
+        withTimeout(2_000) { warming.await() }
+        job.cancelAndJoin()
+        assertEquals(0, socket.writes.get())
+        assertEquals(1, socket.closes.get())
+    }
+
+    @Test fun cancellationDuringDrainClosesWithoutResending() = runBlocking {
+        val socket = Socket()
+        val draining = CompletableDeferred<Unit>()
+        val job = launch {
+            PrinterConnection.use(
+                secure = { socket }, insecure = { error("Would duplicate receipt") }, connect = {},
+                write = { it.writes.incrementAndGet(); Unit },
+                pause = {
+                    if (it == 500L) {
+                        assertEquals(1, socket.writes.get())
+                        assertEquals(0, socket.closes.get())
+                        draining.complete(Unit)
+                        awaitCancellation()
+                    }
+                },
+            )
+        }
+        withTimeout(2_000) { draining.await() }
+        job.cancelAndJoin()
+        assertEquals(1, socket.writes.get())
+        assertEquals(1, socket.closes.get())
+    }
+
+    @Test fun drainFailureNeverReconnectsOrResends() = runBlocking {
+        val socket = Socket()
+        try {
+            PrinterConnection.use(
+                secure = { socket }, insecure = { error("Would duplicate receipt") }, connect = {},
+                write = { it.writes.incrementAndGet(); Unit },
+                pause = { if (it == 500L) throw IOException("Lost connection after flush") },
+            )
+            error("Expected IOException")
+        } catch (error: IOException) {
+            assertTrue(error.message!!.contains("may be partially printed"))
+        }
+        assertEquals(1, socket.writes.get())
         assertEquals(1, socket.closes.get())
     }
 }

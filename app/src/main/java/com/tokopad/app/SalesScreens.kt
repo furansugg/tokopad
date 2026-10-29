@@ -1,11 +1,13 @@
 package com.tokopad.app
 
 import android.content.res.Configuration
+import android.graphics.BitmapFactory
 import android.os.LocaleList
+import android.util.Base64
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -21,6 +23,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
@@ -29,6 +32,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import java.time.Instant
@@ -37,12 +41,14 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
-private val SalesPrimary = Color(0xFF18181B)
-private val SalesInk = Color(0xFF09090B)
-private val SalesBackground = Color(0xFFFAFAFA)
-private val SalesMuted = Color(0xFFF4F4F5)
-private val SalesSecondary = Color(0xFF71717A)
-private val SalesBorder = Color(0xFFE4E4E7)
+private val SalesPrimary: Color @Composable get() = MaterialTheme.colorScheme.primary
+private val SalesInk: Color @Composable get() = MaterialTheme.colorScheme.onSurface
+private val SalesBackground: Color @Composable get() = MaterialTheme.colorScheme.background
+private val SalesSurface: Color @Composable get() = MaterialTheme.colorScheme.surface
+private val SalesOnPrimary: Color @Composable get() = MaterialTheme.colorScheme.onPrimary
+private val SalesMuted: Color @Composable get() = MaterialTheme.colorScheme.surfaceVariant
+private val SalesSecondary: Color @Composable get() = MaterialTheme.colorScheme.onSurfaceVariant
+private val SalesBorder: Color @Composable get() = MaterialTheme.colorScheme.outlineVariant
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -54,7 +60,7 @@ private fun DateRange(language: String, from: Long, to: Long, onRange: (Long, Lo
     val label = if (from == today && to == today) l(language, "Today", "Hari ini")
     else if (from == to) LocalDate.ofEpochDay(from).format(formatter)
     else "${LocalDate.ofEpochDay(from).format(formatter)} – ${LocalDate.ofEpochDay(to).format(formatter)}"
-    OutlinedButton(onClick = { open = true }, shape = RoundedCornerShape(8.dp), border = BorderStroke(1.dp, SalesBorder), colors = ButtonDefaults.outlinedButtonColors(containerColor = Color.White, contentColor = SalesInk), contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)) {
+    OutlinedButton(onClick = { open = true }, modifier = Modifier.heightIn(min = 48.dp), shape = RoundedCornerShape(8.dp), border = BorderStroke(1.dp, SalesBorder), colors = ButtonDefaults.outlinedButtonColors(containerColor = SalesSurface, contentColor = SalesInk), contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)) {
         PadIcon("calendar", Modifier.size(16.dp), SalesSecondary)
         Spacer(Modifier.width(8.dp))
         Text(label, style = MaterialTheme.typography.labelLarge)
@@ -63,7 +69,7 @@ private fun DateRange(language: String, from: Long, to: Long, onRange: (Long, Lo
         val configuration = Configuration(LocalConfiguration.current).apply { setLocales(LocaleList(locale)) }
         CompositionLocalProvider(LocalConfiguration provides configuration) {
             val state = rememberDateRangePickerState(initialSelectedStartDateMillis = from * 86_400_000L, initialSelectedEndDateMillis = to * 86_400_000L)
-            val colors = DatePickerDefaults.colors(containerColor = Color.White, selectedDayContainerColor = SalesPrimary, selectedDayContentColor = Color.White, todayContentColor = SalesInk, todayDateBorderColor = SalesPrimary, dayInSelectionRangeContainerColor = SalesMuted, dayInSelectionRangeContentColor = SalesInk)
+            val colors = DatePickerDefaults.colors(containerColor = SalesSurface, selectedDayContainerColor = SalesPrimary, selectedDayContentColor = SalesOnPrimary, todayContentColor = SalesInk, todayDateBorderColor = SalesPrimary, dayInSelectionRangeContainerColor = SalesMuted, dayInSelectionRangeContentColor = SalesInk)
             DatePickerDialog(onDismissRequest = { open = false }, shape = RoundedCornerShape(10.dp), colors = colors, confirmButton = {
                 TextButton(enabled = state.selectedStartDateMillis != null && state.selectedEndDateMillis != null, onClick = {
                     val start = state.selectedStartDateMillis
@@ -83,11 +89,11 @@ private fun DateRange(language: String, from: Long, to: Long, onRange: (Long, Lo
 @Composable
 fun DashboardScreen(data: Dashboard, sales: List<Sale>, language: String, from: Long, to: Long, onRange: (Long, Long) -> Unit, onCheckout: () -> Unit, onSale: (Sale) -> Unit) {
     LazyColumn(Modifier.fillMaxSize().background(SalesBackground), contentPadding = PaddingValues(16.dp)) {
-        item { Row(Modifier.fillMaxWidth().padding(bottom = 20.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(l(language, "Overview", "Ringkasan"), Modifier.weight(1f), color = SalesInk, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+        item { Column(Modifier.fillMaxWidth().padding(bottom = 20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(l(language, "Overview", "Ringkasan"), color = SalesInk, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
             DateRange(language, from, to, onRange)
         } }
-        item { Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(10.dp), color = Color.White, contentColor = SalesInk, border = BorderStroke(1.dp, SalesBorder)) {
+        item { Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(10.dp), color = SalesSurface, contentColor = SalesInk, border = BorderStroke(1.dp, SalesBorder)) {
             Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                     Text(l(language, "Total sales", "Total penjualan"), color = SalesSecondary, style = MaterialTheme.typography.labelLarge)
@@ -97,7 +103,7 @@ fun DashboardScreen(data: Dashboard, sales: List<Sale>, language: String, from: 
         } } }
         item { Row(Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 20.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             listOf(l(language, "Transactions", "Transaksi") to "${data.count}", l(language, "Average sale", "Rata-rata penjualan") to money(data.average, language)).forEach { (label, value) ->
-                Surface(Modifier.weight(1f), shape = RoundedCornerShape(10.dp), color = Color.White, border = BorderStroke(1.dp, SalesBorder)) {
+                Surface(Modifier.weight(1f), shape = RoundedCornerShape(10.dp), color = SalesSurface, contentColor = SalesInk, border = BorderStroke(1.dp, SalesBorder)) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(label, style = MaterialTheme.typography.labelMedium, color = SalesSecondary)
                         Text(value, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = SalesInk)
@@ -105,12 +111,11 @@ fun DashboardScreen(data: Dashboard, sales: List<Sale>, language: String, from: 
                 }
             }
         } }
-        item { Button(onClick = onCheckout, modifier = Modifier.fillMaxWidth().height(48.dp), shape = RoundedCornerShape(8.dp), colors = ButtonDefaults.buttonColors(containerColor = SalesPrimary, contentColor = Color.White)) {
-            PadIcon("plus", tint = Color.White)
+        item { Button(onClick = onCheckout, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp), shape = RoundedCornerShape(8.dp), colors = ButtonDefaults.buttonColors(containerColor = SalesPrimary, contentColor = SalesOnPrimary)) {
+            PadIcon("plus", tint = SalesOnPrimary)
             Spacer(Modifier.width(10.dp))
-            Text(l(language, "New sale", "Mulai jualan"), style = MaterialTheme.typography.titleSmall)
-            Spacer(Modifier.weight(1f))
-            PadIcon("arrow", tint = Color.White)
+            Text(l(language, "New sale", "Mulai jualan"), Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
+            PadIcon("arrow", tint = SalesOnPrimary)
         } }
         item { Column(Modifier.padding(top = 28.dp, bottom = 12.dp)) { SectionHeading(l(language, "Recent transactions", "Transaksi terbaru")) } }
         if (sales.isEmpty()) item { EmptyState("receipt", l(language, "No sales yet", "Belum ada penjualan"), l(language, "Completed sales appear here.", "Penjualan selesai akan tampil di sini.")) }
@@ -123,8 +128,8 @@ fun DashboardScreen(data: Dashboard, sales: List<Sale>, language: String, from: 
 fun HistoryScreen(sales: List<Sale>, language: String, from: Long, to: Long, query: String, onSearch: (String) -> Unit, onRange: (Long, Long) -> Unit, onSale: (Sale) -> Unit) {
     var search by remember(query) { mutableStateOf(query) }
     LazyColumn(Modifier.fillMaxSize().background(SalesBackground), contentPadding = PaddingValues(16.dp)) {
-        item { Row(Modifier.fillMaxWidth().padding(bottom = 16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(l(language, "History", "Riwayat"), Modifier.weight(1f), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold, color = SalesInk)
+        item { Column(Modifier.fillMaxWidth().padding(bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(l(language, "History", "Riwayat"), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold, color = SalesInk)
             DateRange(language, from, to, onRange)
         } }
         item { OutlinedTextField(search, { search = it }, Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), leadingIcon = { PadIcon("search") }, label = { Text(l(language, "Transaction number", "Nomor transaksi")) }, trailingIcon = { TextButton(onClick = { onSearch(search) }) { Text(l(language, "Search", "Cari")) } }, singleLine = true) }
@@ -137,16 +142,16 @@ fun HistoryScreen(sales: List<Sale>, language: String, from: Long, to: Long, que
 
 @Composable
 private fun SaleRow(sale: Sale, language: String, onSale: (Sale) -> Unit) {
-    Column(Modifier.fillMaxWidth().background(Color.White).clickable { onSale(sale) }) {
+    Column(Modifier.fillMaxWidth().background(SalesSurface).clickable { onSale(sale) }) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 14.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                Text("#${sale.number.takeLast(8)}", style = MaterialTheme.typography.labelLarge, color = SalesInk)
+                Text(sale.receiptNumber, style = MaterialTheme.typography.labelLarge, color = SalesInk)
                 Text(DateTimeFormatter.ofPattern(if (language == "id") "d MMM · HH:mm" else "MMM d · HH:mm", Locale.forLanguageTag(language)).withZone(ZoneId.of(sale.zoneId)).format(Instant.ofEpochMilli(sale.createdAt)), style = MaterialTheme.typography.bodySmall, color = SalesSecondary)
                 Text(sale.customerName.ifBlank { l(language, "Walk-in customer", "Pelanggan umum") }, style = MaterialTheme.typography.bodySmall, color = SalesSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Column(Modifier.weight(1f), horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(money(sale.total, language), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, color = SalesInk)
-                Surface(shape = RoundedCornerShape(4.dp), color = Color.White, border = BorderStroke(1.dp, SalesBorder)) {
+                Surface(shape = RoundedCornerShape(4.dp), color = SalesSurface, contentColor = SalesInk, border = BorderStroke(1.dp, SalesBorder)) {
                     Text(if (sale.cancelledAt != null) l(language, "Cancelled", "Dibatalkan") else l(language, "Paid", "Lunas"), Modifier.padding(horizontal = 7.dp, vertical = 3.dp), style = MaterialTheme.typography.labelSmall, color = SalesSecondary)
                 }
             }
@@ -160,33 +165,47 @@ fun SaleDialog(sale: Sale, settings: ShopSettings, busy: Boolean, onDismiss: () 
     var cancelling by remember(sale.id) { mutableStateOf(false) }
     var reason by remember { mutableStateOf("") }
     val language = settings.language
-    AlertDialog(onDismissRequest = { if (!busy) onDismiss() }, containerColor = Color.White, shape = RoundedCornerShape(10.dp), title = { Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    AlertDialog(onDismissRequest = { if (!busy) onDismiss() }, modifier = Modifier.imePadding(), containerColor = SalesSurface, shape = RoundedCornerShape(10.dp), title = { Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(l(language, "Receipt", "Nota"), color = SalesInk)
-        Text(sale.number, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(sale.receiptNumber, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
     } },
         text = { Column(Modifier.heightIn(max = 500.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Surface(shape = RoundedCornerShape(8.dp), color = Color.White, border = BorderStroke(1.dp, SalesBorder)) {
-                Box(Modifier.horizontalScroll(rememberScrollState()).padding(16.dp)) {
-                    Text(Receipt.text(sale, settings), fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall, color = SalesInk, softWrap = false)
+            // Physical receipt paper deliberately stays white in either theme.
+            Surface(shape = RoundedCornerShape(8.dp), color = Color.White, contentColor = Color.Black, border = BorderStroke(1.dp, SalesBorder)) {
+                Column(Modifier.fillMaxWidth().padding(12.dp)) {
+                    Receipt.blocks(sale, settings).forEach { block ->
+                        val bitmap = remember(block.logo) {
+                            if (block.logo.isBlank()) null else runCatching {
+                                val bytes = Base64.decode(block.logo.orEmpty().substringAfter("base64,"), Base64.DEFAULT)
+                                BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+                            }.getOrNull()
+                        }
+                        if (bitmap != null) Image(bitmap, l(language, "Shop logo", "Logo toko"), Modifier.align(Alignment.CenterHorizontally).sizeIn(maxWidth = 160.dp, maxHeight = 100.dp))
+                        if (block.text.isNotEmpty()) Text(block.text, Modifier.fillMaxWidth(), fontFamily = FontFamily.Monospace,
+                            fontSize = if (block.large) 20.sp else 11.sp, lineHeight = if (block.large) 26.sp else 16.sp,
+                            fontWeight = if (block.emphasis || block.large) FontWeight.Bold else FontWeight.Normal,
+                            textAlign = if (block.centered) TextAlign.Center else TextAlign.Start, color = Color.Black)
+                    }
                 }
             }
             if (sale.cancelledAt == null) {
-                if (!cancelling) TextButton(onClick = { cancelling = true }, enabled = !busy) { Text(l(language, "Cancel transaction", "Batalkan transaksi")) }
+                if (!cancelling) TextButton(onClick = { cancelling = true }, enabled = !busy, modifier = Modifier.heightIn(min = 48.dp)) { Text(l(language, "Cancel transaction", "Batalkan transaksi")) }
                 else {
                     Text(l(language, "Stock will be returned. Refund payment separately.", "Stok dikembalikan. Pengembalian pembayaran dilakukan terpisah."))
                     OutlinedTextField(reason, { reason = it.take(500) }, Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), label = { Text(l(language, "Cancellation reason", "Alasan pembatalan")) })
-                    TextButton(onClick = { onCancel(reason.trim()) }, enabled = !busy && reason.isNotBlank()) { Text(l(language, "Confirm cancellation", "Konfirmasi pembatalan")) }
+                    TextButton(onClick = { onCancel(reason.trim()) }, enabled = !busy && reason.isNotBlank(), modifier = Modifier.heightIn(min = 48.dp)) { Text(l(language, "Confirm cancellation", "Konfirmasi pembatalan")) }
                 }
             } else Text(sale.cancellationReason)
         } },
-        confirmButton = { TextButton(onClick = onPrint, enabled = !busy) { Text(l(language, "Print", "Cetak")) } },
-        dismissButton = { TextButton(onClick = onDismiss, enabled = !busy) { Text(l(language, "Close", "Tutup")) } })
+        confirmButton = { TextButton(onClick = onPrint, enabled = !busy, modifier = Modifier.heightIn(min = 48.dp)) { Text(l(language, "Print", "Cetak")) } },
+        dismissButton = { TextButton(onClick = onDismiss, enabled = !busy, modifier = Modifier.heightIn(min = 48.dp)) { Text(l(language, "Close", "Tutup")) } })
 }
 
 @Composable
 fun CheckoutScreen(products: List<Product>, customers: List<Customer>, cart: List<CartLine>, language: String, busy: Boolean, onCart: (List<CartLine>) -> Unit, onComplete: (Customer?, Long, String, Long) -> Unit) {
     var search by rememberSaveable { mutableStateOf("") }
     var adding by rememberSaveable { mutableStateOf<Product?>(null) }
+    var editing by rememberSaveable { mutableStateOf<Int?>(null) }
     var customer by rememberSaveable { mutableStateOf<Customer?>(null) }
     var customerSearch by rememberSaveable { mutableStateOf("") }
     var discount by rememberSaveable { mutableStateOf("") }
@@ -203,17 +222,14 @@ fun CheckoutScreen(products: List<Product>, customers: List<Customer>, cart: Lis
     val paidValue = if (payment == "cash") paid.toLongOrNull() else total
     val canComplete = cart.isNotEmpty() && total != null && paidValue != null && paidValue >= total && !busy
     val matchingProducts = products.filter { it.name.contains(search, true) || it.category.contains(search, true) }
-    Column(Modifier.fillMaxSize().background(SalesBackground)) {
+    Column(Modifier.fillMaxSize().background(SalesBackground).imePadding()) {
         Text(l(language, "Checkout", "Kasir"), Modifier.padding(horizontal = 16.dp, vertical = 16.dp), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold, color = SalesInk)
-        Surface(Modifier.padding(horizontal = 16.dp), color = SalesMuted, shape = RoundedCornerShape(8.dp)) {
+        Surface(Modifier.padding(horizontal = 16.dp), color = SalesMuted, contentColor = SalesInk, shape = RoundedCornerShape(8.dp)) {
             Row(Modifier.fillMaxWidth().padding(4.dp).selectableGroup()) {
                 listOf(false, true).forEach { isCart ->
                     val selected = cartTab == isCart
-                    Tab(selected = selected, onClick = { cartTab = isCart }, modifier = Modifier.weight(1f).testTag(if (isCart) "checkout-cart" else "checkout-products").background(if (selected) Color.White else Color.Transparent, RoundedCornerShape(6.dp)), selectedContentColor = SalesInk, unselectedContentColor = SalesSecondary, text = {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text(if (isCart) l(language, "Cart", "Keranjang") else l(language, "Products", "Produk"), style = MaterialTheme.typography.labelLarge)
-                            if (isCart) Text("(${cart.size})", style = MaterialTheme.typography.labelMedium)
-                        }
+                    Tab(selected = selected, onClick = { cartTab = isCart }, modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag(if (isCart) "checkout-cart" else "checkout-products").background(if (selected) SalesSurface else Color.Transparent, RoundedCornerShape(6.dp)), selectedContentColor = SalesInk, unselectedContentColor = SalesSecondary, text = {
+                        Text(if (isCart) l(language, "Cart", "Keranjang") + " (${cart.size})" else l(language, "Products", "Produk"), style = MaterialTheme.typography.labelLarge)
                     })
                 }
             }
@@ -224,7 +240,7 @@ fun CheckoutScreen(products: List<Product>, customers: List<Customer>, cart: Lis
                 if (products.isEmpty()) item { EmptyState("products", l(language, "Your shelves are waiting", "Rak tokomu masih kosong"), l(language, "Add products in Products first.", "Tambahkan produk di menu Produk dulu.")) }
                 else if (matchingProducts.isEmpty()) item { EmptyState("search", l(language, "No products found", "Produk tidak ditemukan"), l(language, "Try a different name or category.", "Coba nama atau kategori lain.")) }
                 items(matchingProducts, key = { "product-${it.id}" }) { product ->
-                    Column(Modifier.fillMaxWidth().background(Color.White).clickable(enabled = !busy && cart.size < 200) { adding = product }) {
+                    Column(Modifier.fillMaxWidth().background(SalesSurface).clickable(enabled = !busy && cart.size < 200) { editing = null; adding = product }) {
                         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                                 Text(product.name, style = MaterialTheme.typography.titleSmall, color = SalesInk, maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -236,8 +252,8 @@ fun CheckoutScreen(products: List<Product>, customers: List<Customer>, cart: Lis
                                     ProductKind.VOUCHER -> l(language, "Voucher", "Voucher")
                                     ProductKind.OTHER -> l(language, "Other", "Lainnya")
                                 } + if (product.trackStock) " · " + l(language, "Stock: ", "Stok: ") + product.stock else "", style = MaterialTheme.typography.bodySmall, color = SalesSecondary)
+                                Text(money(product.price, language), style = MaterialTheme.typography.labelLarge, color = SalesInk)
                             }
-                            Text(money(product.price, language), style = MaterialTheme.typography.labelLarge, color = SalesInk)
                             PadIcon("plus", Modifier.size(18.dp), if (!busy && cart.size < 200) SalesInk else SalesSecondary)
                         }
                         HorizontalDivider(color = SalesBorder)
@@ -248,32 +264,34 @@ fun CheckoutScreen(products: List<Product>, customers: List<Customer>, cart: Lis
                 if (cart.isEmpty()) item { EmptyState("checkout", l(language, "Cart is empty", "Keranjang kosong"), l(language, "Choose a product to get started.", "Pilih produk untuk mulai.")) }
                 items(cart.indices.toList(), key = { "cart-$it" }) { index ->
                     val line = cart[index]
-                    Column(Modifier.fillMaxWidth().background(Color.White).padding(horizontal = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Row(Modifier.fillMaxWidth().padding(top = 14.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.Top) {
-                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                                Text(line.product.name, style = MaterialTheme.typography.titleSmall, color = SalesInk)
-                                Text("${line.quantity} × ${money(line.product.price, language)}", style = MaterialTheme.typography.bodySmall, color = SalesSecondary)
-                            }
+                    Column(Modifier.fillMaxWidth().background(SalesSurface).padding(horizontal = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Column(Modifier.fillMaxWidth().padding(top = 14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                            Text(line.product.name, style = MaterialTheme.typography.titleSmall, color = SalesInk)
+                            Text("${line.quantity} × ${money(line.product.price, language)}", style = MaterialTheme.typography.bodySmall, color = SalesSecondary)
                             Text(runCatching { money(Math.multiplyExact(line.quantity, line.product.price), language) }.getOrDefault("—"), style = MaterialTheme.typography.labelLarge, color = SalesInk)
                         }
+                        if (line.buyerName.isNotBlank()) Text(line.buyerName, style = MaterialTheme.typography.bodySmall, color = SalesSecondary)
                         if (line.destination.isNotBlank()) Text(line.destination, style = MaterialTheme.typography.bodySmall, color = SalesSecondary)
+                        if (line.kwh.isNotBlank()) Text("${line.kwh} kWh", style = MaterialTheme.typography.bodySmall, color = SalesSecondary)
                         if (line.code.isNotBlank()) Text(line.code, style = MaterialTheme.typography.bodySmall, color = SalesSecondary)
                         if (line.note.isNotBlank()) Text(line.note, style = MaterialTheme.typography.bodySmall, color = SalesSecondary)
-                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                            Surface(shape = RoundedCornerShape(8.dp), color = Color.White, border = BorderStroke(1.dp, SalesBorder)) {
+                        if (line.product.kind == ProductKind.PHYSICAL) {
+                            Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), color = SalesSurface, contentColor = SalesInk, border = BorderStroke(1.dp, SalesBorder)) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    TextButton(enabled = !busy && line.quantity > 1, modifier = Modifier.width(48.dp).semantics { contentDescription = l(language, "Decrease quantity for ", "Kurangi jumlah ") + line.product.name }, contentPadding = PaddingValues(0.dp), colors = ButtonDefaults.textButtonColors(contentColor = SalesInk), onClick = { onCart(cart.mapIndexed { i, value -> if (i == index) value.copy(quantity = value.quantity - 1) else value }) }) { Text("−", fontSize = 20.sp) }
-                                    Text("${line.quantity}", Modifier.padding(horizontal = 6.dp), style = MaterialTheme.typography.labelLarge, color = SalesInk)
-                                    TextButton(enabled = !busy && line.quantity < 1_000_000, modifier = Modifier.width(48.dp).semantics { contentDescription = l(language, "Increase quantity for ", "Tambah jumlah ") + line.product.name }, contentPadding = PaddingValues(0.dp), colors = ButtonDefaults.textButtonColors(contentColor = SalesInk), onClick = { onCart(cart.mapIndexed { i, value -> if (i == index) value.copy(quantity = value.quantity + 1) else value }) }) { Text("+", fontSize = 20.sp) }
+                                    TextButton(enabled = !busy && line.quantity > 1, modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp).semantics { contentDescription = l(language, "Decrease quantity for ", "Kurangi jumlah ") + line.product.name }, contentPadding = PaddingValues(0.dp), colors = ButtonDefaults.textButtonColors(contentColor = SalesInk), onClick = { onCart(cart.mapIndexed { i, value -> if (i == index) value.copy(quantity = value.quantity - 1) else value }) }) { Text("−", fontSize = 20.sp) }
+                                    Text("${line.quantity}", Modifier.weight(1f).padding(horizontal = 6.dp), textAlign = TextAlign.Center, style = MaterialTheme.typography.labelLarge, color = SalesInk)
+                                    TextButton(enabled = !busy && line.quantity < 1_000_000, modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp).semantics { contentDescription = l(language, "Increase quantity for ", "Tambah jumlah ") + line.product.name }, contentPadding = PaddingValues(0.dp), colors = ButtonDefaults.textButtonColors(contentColor = SalesInk), onClick = { onCart(cart.mapIndexed { i, value -> if (i == index) value.copy(quantity = value.quantity + 1) else value }) }) { Text("+", fontSize = 20.sp) }
                                 }
                             }
-                            Spacer(Modifier.weight(1f))
-                            TextButton(enabled = !busy, onClick = { onCart(cart.filterIndexed { i, _ -> i != index }) }, colors = ButtonDefaults.textButtonColors(contentColor = SalesSecondary)) { Text(l(language, "Remove", "Hapus")) }
+                        }
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                            if (line.product.kind != ProductKind.PHYSICAL) TextButton(enabled = !busy, modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag("edit-digital-$index").semantics { contentDescription = l(language, "Edit ", "Ubah ") + line.product.name }, onClick = { editing = index; adding = line.product }, colors = ButtonDefaults.textButtonColors(contentColor = SalesInk)) { Text(l(language, "Edit", "Ubah")) }
+                            TextButton(enabled = !busy, modifier = Modifier.heightIn(min = 48.dp), onClick = { onCart(cart.filterIndexed { i, _ -> i != index }) }, colors = ButtonDefaults.textButtonColors(contentColor = SalesSecondary)) { Text(l(language, "Remove", "Hapus")) }
                         }
                         HorizontalDivider(color = SalesBorder)
                     }
                 }
-                item { OutlinedButton(onClick = { showCustomer = !showCustomer }, modifier = Modifier.fillMaxWidth().padding(top = 16.dp).testTag("checkout-customer"), shape = RoundedCornerShape(8.dp), border = BorderStroke(1.dp, SalesBorder), colors = ButtonDefaults.outlinedButtonColors(containerColor = Color.White, contentColor = SalesInk)) {
+                item { OutlinedButton(onClick = { showCustomer = !showCustomer }, modifier = Modifier.fillMaxWidth().padding(top = 16.dp).heightIn(min = 48.dp).testTag("checkout-customer"), shape = RoundedCornerShape(8.dp), border = BorderStroke(1.dp, SalesBorder), colors = ButtonDefaults.outlinedButtonColors(containerColor = SalesSurface, contentColor = SalesInk)) {
                     PadIcon("customers", Modifier.size(18.dp), SalesSecondary)
                     Spacer(Modifier.width(8.dp))
                     Text(customer?.name ?: l(language, "Add customer (optional)", "Tambah pelanggan (opsional)"), Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -282,25 +300,25 @@ fun CheckoutScreen(products: List<Product>, customers: List<Customer>, cart: Lis
                 if (showCustomer) {
                     item { OutlinedTextField(customerSearch, { customerSearch = it }, Modifier.fillMaxWidth().padding(top = 8.dp), shape = RoundedCornerShape(8.dp), leadingIcon = { PadIcon("search", tint = SalesSecondary) }, label = { Text(l(language, "Find customer (optional)", "Cari pelanggan (opsional)")) }, singleLine = true) }
                     if (customerSearch.isNotBlank()) items(customers.filter { it.name.contains(customerSearch, true) || it.phone.contains(customerSearch) }.take(5), key = { "customer-${it.id}" }) { value ->
-                        TextButton(onClick = { customer = value; customerSearch = ""; showCustomer = false }, colors = ButtonDefaults.textButtonColors(contentColor = SalesInk)) { Text("${value.name} · ${value.phone}") }
+                        TextButton(onClick = { customer = value; customerSearch = ""; showCustomer = false }, modifier = Modifier.heightIn(min = 48.dp), colors = ButtonDefaults.textButtonColors(contentColor = SalesInk)) { Text("${value.name} · ${value.phone}") }
                     }
-                    item { TextButton(onClick = { customer = null; showCustomer = false }, colors = ButtonDefaults.textButtonColors(contentColor = SalesSecondary)) { Text(l(language, "Walk-in customer", "Pelanggan umum")) } }
+                    item { TextButton(onClick = { customer = null; showCustomer = false }, modifier = Modifier.heightIn(min = 48.dp), colors = ButtonDefaults.textButtonColors(contentColor = SalesSecondary)) { Text(l(language, "Walk-in customer", "Pelanggan umum")) } }
                 }
                 item {
-                    Surface(Modifier.fillMaxWidth().padding(top = 16.dp), shape = RoundedCornerShape(10.dp), color = Color.White, contentColor = SalesInk, border = BorderStroke(1.dp, SalesBorder)) {
+                    Surface(Modifier.fillMaxWidth().padding(top = 16.dp), shape = RoundedCornerShape(10.dp), color = SalesSurface, contentColor = SalesInk, border = BorderStroke(1.dp, SalesBorder)) {
                         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                             Text(l(language, "Payment", "Pembayaran"), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                 Text(l(language, "Subtotal", "Subtotal"), color = SalesSecondary, style = MaterialTheme.typography.bodyMedium)
                                 Text(subtotal?.let { money(it, language) } ?: "—", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
                             }
                             OutlinedTextField(discount, { discount = it.filter(Char::isDigit).take(15) }, Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), label = { Text(l(language, "Discount (Rp)", "Diskon (Rp)")) }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, isError = total == null)
                             HorizontalDivider(color = SalesBorder)
                             Text(l(language, "Total: ", "Total: ") + (total?.let { money(it, language) } ?: "—"), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                            Surface(color = SalesMuted, shape = RoundedCornerShape(8.dp)) {
+                            Surface(color = SalesMuted, contentColor = SalesInk, shape = RoundedCornerShape(8.dp)) {
                                 Row(Modifier.fillMaxWidth().padding(4.dp).selectableGroup()) {
                                     listOf("cash", "noncash").forEach { method ->
-                                        Tab(selected = payment == method, onClick = { payment = method }, modifier = Modifier.weight(1f).background(if (payment == method) Color.White else Color.Transparent, RoundedCornerShape(6.dp)), selectedContentColor = SalesInk, unselectedContentColor = SalesSecondary, text = { Text(if (method == "cash") l(language, "Cash", "Tunai") else l(language, "Noncash", "Nontunai"), style = MaterialTheme.typography.labelLarge) })
+                                        Tab(selected = payment == method, onClick = { payment = method }, modifier = Modifier.weight(1f).heightIn(min = 48.dp).background(if (payment == method) SalesSurface else Color.Transparent, RoundedCornerShape(6.dp)), selectedContentColor = SalesInk, unselectedContentColor = SalesSecondary, text = { Text(if (method == "cash") l(language, "Cash", "Tunai") else l(language, "Noncash", "Nontunai"), style = MaterialTheme.typography.labelLarge) })
                                     }
                                 }
                             }
@@ -309,55 +327,87 @@ fun CheckoutScreen(products: List<Product>, customers: List<Customer>, cart: Lis
                         }
                     }
                 }
-                item { Button(onClick = { confirm = true }, enabled = canComplete, modifier = Modifier.fillMaxWidth().padding(top = 16.dp).height(48.dp), shape = RoundedCornerShape(8.dp), colors = ButtonDefaults.buttonColors(containerColor = SalesPrimary, contentColor = Color.White)) {
-                    Text(l(language, "Review sale", "Periksa penjualan"), style = MaterialTheme.typography.labelLarge)
+                item { Button(onClick = { confirm = true }, enabled = canComplete, modifier = Modifier.fillMaxWidth().padding(top = 16.dp).heightIn(min = 48.dp), shape = RoundedCornerShape(8.dp), colors = ButtonDefaults.buttonColors(containerColor = SalesPrimary, contentColor = SalesOnPrimary)) {
+                    Text(l(language, "Review sale", "Periksa penjualan"), Modifier.weight(1f), style = MaterialTheme.typography.labelLarge)
                     Spacer(Modifier.width(12.dp))
-                    PadIcon("arrow", tint = if (canComplete) Color.White else SalesSecondary)
+                    PadIcon("arrow", tint = if (canComplete) SalesOnPrimary else SalesSecondary)
                 } }
             }
         }
-        if (!cartTab && cart.isNotEmpty()) Surface(color = Color.White, shadowElevation = 0.dp) {
+        if (!cartTab && cart.isNotEmpty()) Surface(color = SalesSurface, contentColor = SalesInk, shadowElevation = 0.dp) {
             Column {
                 HorizontalDivider(color = SalesBorder)
-                Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text("${cart.size} " + l(language, "items", "item"), style = MaterialTheme.typography.bodySmall, color = SalesSecondary)
                         Text(total?.let { money(it, language) } ?: "—", style = MaterialTheme.typography.titleMedium, color = SalesInk, fontWeight = FontWeight.SemiBold)
                     }
-                    Button(onClick = { cartTab = true }, modifier = Modifier.height(48.dp), shape = RoundedCornerShape(8.dp), colors = ButtonDefaults.buttonColors(containerColor = SalesPrimary, contentColor = Color.White)) { Text(l(language, "View cart", "Lihat keranjang")) }
+                    Button(onClick = { cartTab = true }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp), shape = RoundedCornerShape(8.dp), colors = ButtonDefaults.buttonColors(containerColor = SalesPrimary, contentColor = SalesOnPrimary)) { Text(l(language, "View cart", "Lihat keranjang")) }
                 }
             }
         }
     }
-    adding?.let { product -> AddLineDialog(product, language, onDismiss = { adding = null }, onAdd = { line ->
+    adding?.let { product -> AddLineDialog(product, customers, language, initialLine = editing?.let { cart.getOrNull(it) },
+        maxQuantity = if (editing == null && product.kind == ProductKind.PHYSICAL) 1_000_000L - (cart.firstOrNull { it.product.id == product.id }?.quantity ?: 0L) else 1_000_000L,
+        onDismiss = { adding = null; editing = null }, onAdd = { line ->
         val match = if (product.kind == ProductKind.PHYSICAL) cart.indexOfFirst { it.product.id == product.id } else -1
-        if (match >= 0) onCart(cart.mapIndexed { i, value -> if (i == match) value.copy(quantity = value.quantity + line.quantity) else value }) else onCart(cart + line)
+        if (editing != null) onCart(cart.mapIndexed { i, value -> if (i == editing) line else value })
+        else if (match >= 0) onCart(cart.mapIndexed { i, value -> if (i == match) value.copy(quantity = value.quantity + line.quantity) else value }) else onCart(cart + line)
         adding = null
+        editing = null
     }) }
-    if (confirm) AlertDialog(onDismissRequest = { confirm = false }, containerColor = Color.White, shape = RoundedCornerShape(10.dp), title = { Text(l(language, "Finish this sale?", "Selesaikan penjualan?")) },
+    if (confirm) AlertDialog(onDismissRequest = { confirm = false }, containerColor = SalesSurface, shape = RoundedCornerShape(10.dp), title = { Text(l(language, "Finish this sale?", "Selesaikan penjualan?")) },
         text = { Text("${cart.size} " + l(language, "items", "item") + "\n" + money(total ?: 0, language) + "\n" + l(language, "The sale is saved before printing.", "Penjualan disimpan sebelum mencetak.")) },
         confirmButton = { TextButton(enabled = canComplete, onClick = { confirm = false; onComplete(customer, discountValue ?: 0, payment, paidValue ?: 0) }) { Text(l(language, "Complete sale", "Selesaikan")) } },
         dismissButton = { TextButton(onClick = { confirm = false }) { Text(l(language, "Back", "Kembali")) } })
 }
 
 @Composable
-private fun AddLineDialog(product: Product, language: String, onDismiss: () -> Unit, onAdd: (CartLine) -> Unit) {
-    var quantity by rememberSaveable(product.id) { mutableStateOf("1") }
-    var destination by rememberSaveable(product.id) { mutableStateOf("") }
-    var code by rememberSaveable(product.id) { mutableStateOf("") }
-    var note by rememberSaveable(product.id) { mutableStateOf("") }
+private fun AddLineDialog(product: Product, customers: List<Customer>, language: String, initialLine: CartLine? = null, maxQuantity: Long = 1_000_000, onDismiss: () -> Unit, onAdd: (CartLine) -> Unit) {
+    var quantity by rememberSaveable(product.id, initialLine) { mutableStateOf((initialLine?.quantity ?: 1).toString()) }
+    var destination by rememberSaveable(product.id, initialLine) { mutableStateOf(initialLine?.destination.orEmpty()) }
+    var code by rememberSaveable(product.id, initialLine) { mutableStateOf(initialLine?.code.orEmpty()) }
+    var note by rememberSaveable(product.id, initialLine) { mutableStateOf(initialLine?.note.orEmpty()) }
+    var buyerName by rememberSaveable(product.id, initialLine) { mutableStateOf(initialLine?.buyerName.orEmpty()) }
+    var kwh by rememberSaveable(product.id, initialLine) { mutableStateOf(initialLine?.kwh.orEmpty()) }
+    var customerId by rememberSaveable(product.id, initialLine) { mutableStateOf(initialLine?.customerId) }
+    var buyerSearch by rememberSaveable(product.id, initialLine) { mutableStateOf("") }
+    val electricity = product.kind == ProductKind.ELECTRICITY
+    val digital = product.kind != ProductKind.PHYSICAL
     val needsDestination = product.kind in listOf(ProductKind.PULSA, ProductKind.DATA, ProductKind.ELECTRICITY)
     val q = quantity.toLongOrNull()
-    val valid = q != null && q in 1..1_000_000 && (!needsDestination || destination.trim().matches(Regex("[+0-9 -]{5,30}"))) && (!product.requiresCode || code.isNotBlank())
-    AlertDialog(onDismissRequest = onDismiss, containerColor = Color.White, shape = RoundedCornerShape(10.dp), title = { Text(product.name, color = SalesInk) }, text = {
-        Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    val normalizedKwh = kwh.trim().replace(',', '.')
+    val kwhValue = normalizedKwh.toBigDecimalOrNull()
+    val validKwh = normalizedKwh.matches(Regex("[0-9]{1,7}(\\.[0-9]{1,3})?")) && kwhValue != null && kwhValue.signum() == 1 && kwhValue <= java.math.BigDecimal("1000000")
+    val valid = q != null && q in 1..maxQuantity && (!needsDestination || destination.trim().matches(Regex("[+0-9 -]{5,30}"))) && (!product.requiresCode || code.isNotBlank()) && (!electricity || (buyerName.isNotBlank() && validKwh))
+    val maxHeight = (LocalConfiguration.current.screenHeightDp * 0.6f).dp
+    AlertDialog(onDismissRequest = onDismiss, modifier = Modifier.imePadding(), containerColor = SalesSurface, shape = RoundedCornerShape(10.dp), title = { Text(product.name, color = SalesInk) }, text = {
+        Column(Modifier.fillMaxWidth().heightIn(max = maxHeight).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(money(product.price, language), style = MaterialTheme.typography.titleLarge, color = SalesInk, fontWeight = FontWeight.SemiBold)
-            OutlinedTextField(quantity, { quantity = it.filter(Char::isDigit).take(7) }, Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), label = { Text(l(language, "Quantity", "Jumlah")) }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
-            if (product.kind != ProductKind.PHYSICAL) {
-                OutlinedTextField(destination, { destination = it.take(100) }, Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), label = { Text(if (product.kind == ProductKind.ELECTRICITY) l(language, "Meter / customer ID", "Nomor meter / ID pelanggan") else l(language, "Destination", "Tujuan")) }, supportingText = { if (needsDestination) Text(l(language, "Required: 5–30 digits, +, spaces or hyphens.", "Wajib: 5–30 angka, +, spasi, atau tanda hubung.")) })
-                if (product.kind in listOf(ProductKind.ELECTRICITY, ProductKind.VOUCHER, ProductKind.OTHER) || product.requiresCode) OutlinedTextField(code, { code = it.take(200) }, Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), label = { Text(l(language, "Token / voucher code", "Token / kode voucher")) }, supportingText = { if (product.requiresCode) Text(l(language, "Required", "Wajib diisi")) })
+            if (!digital) OutlinedTextField(quantity, { quantity = it.filter(Char::isDigit).take(7) }, Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), label = { Text(l(language, "Quantity", "Jumlah")) }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, isError = q == null || q !in 1..maxQuantity)
+            if (digital) {
+                OutlinedTextField(buyerSearch, { buyerSearch = it.take(100) }, Modifier.fillMaxWidth().testTag("digital-buyer-search"), shape = RoundedCornerShape(8.dp), label = { Text(l(language, "Find saved buyer", "Cari pembeli tersimpan")) }, leadingIcon = { PadIcon("search", tint = SalesSecondary) }, singleLine = true)
+                val matches = customers.filter { it.name.contains(buyerSearch.trim(), true) || it.phone.contains(buyerSearch.trim(), true) || it.meterNumber.contains(buyerSearch.trim(), true) }.take(5)
+                matches.forEach { buyer ->
+                    TextButton(onClick = {
+                        customerId = buyer.id
+                        buyerName = buyer.name
+                        destination = if (electricity) buyer.meterNumber else buyer.phone
+                    }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("digital-buyer-${buyer.id}"), colors = ButtonDefaults.textButtonColors(contentColor = SalesInk)) {
+                        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(buyer.name, fontWeight = if (customerId == buyer.id) FontWeight.Bold else FontWeight.Normal)
+                            val details = listOf(buyer.phone, buyer.meterNumber).filter { it.isNotBlank() }.joinToString(" · ")
+                            if (details.isNotBlank()) Text(details, style = MaterialTheme.typography.bodySmall, color = SalesSecondary)
+                        }
+                    }
+                }
+                if (matches.isEmpty()) Text(l(language, "No saved buyers. Enter details below.", "Belum ada pembeli. Isi data di bawah."), color = SalesSecondary, style = MaterialTheme.typography.bodySmall)
+                OutlinedTextField(buyerName, { buyerName = it.take(100); customerId = null }, Modifier.fillMaxWidth().testTag("digital-buyer-name"), shape = RoundedCornerShape(8.dp), label = { Text(if (electricity) l(language, "Customer name", "Nama pelanggan") else l(language, "Customer name (optional)", "Nama pelanggan (opsional)")) }, supportingText = { if (electricity) Text(l(language, "Required", "Wajib diisi")) }, singleLine = true)
+                OutlinedTextField(destination, { destination = it.take(100); customerId = null }, Modifier.fillMaxWidth().testTag("digital-destination"), shape = RoundedCornerShape(8.dp), label = { Text(if (electricity) l(language, "Meter / customer ID", "Nomor meter / ID pelanggan") else l(language, "Destination", "Tujuan")) }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone), singleLine = true, supportingText = { if (needsDestination) Text(l(language, "Required: 5–30 digits, +, spaces or hyphens.", "Wajib: 5–30 angka, +, spasi, atau tanda hubung.")) })
+                if (electricity) OutlinedTextField(kwh, { kwh = it.take(20) }, Modifier.fillMaxWidth().testTag("digital-kwh"), shape = RoundedCornerShape(8.dp), label = { Text(l(language, "Energy (kWh)", "Energi (kWh)")) }, supportingText = { Text(l(language, "Required: 0–1,000,000, greater than zero; up to 3 decimals.", "Wajib: 0–1.000.000, lebih dari nol; maksimal 3 desimal.")) }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true, isError = kwh.isNotBlank() && !validKwh)
+                OutlinedTextField(code, { code = it.take(200) }, Modifier.fillMaxWidth().testTag("digital-code"), shape = RoundedCornerShape(8.dp), label = { Text(l(language, "Token / voucher code", "Token / kode voucher")) }, supportingText = { Text(if (product.requiresCode) l(language, "Required", "Wajib diisi") else l(language, "Optional", "Opsional")) })
                 OutlinedTextField(note, { note = it.take(500) }, Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), label = { Text(l(language, "Note (optional)", "Catatan (opsional)")) })
             }
         }
-    }, confirmButton = { TextButton(enabled = valid, onClick = { onAdd(CartLine(product, q ?: 1, destination.trim(), code.trim(), note.trim())) }) { Text(l(language, "Add", "Tambah")) } }, dismissButton = { TextButton(onClick = onDismiss) { Text(l(language, "Cancel", "Batal")) } })
+    }, confirmButton = { TextButton(enabled = valid, modifier = Modifier.heightIn(min = 48.dp), onClick = { onAdd(CartLine(product, q ?: 1, destination.trim(), code.trim(), note.trim(), buyerName.trim(), if (electricity) normalizedKwh else "", customerId)) }) { Text(if (initialLine == null) l(language, "Add", "Tambah") else l(language, "Save", "Simpan")) } }, dismissButton = { TextButton(onClick = onDismiss, modifier = Modifier.heightIn(min = 48.dp)) { Text(l(language, "Cancel", "Batal")) } })
 }

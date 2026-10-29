@@ -7,6 +7,7 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeout
@@ -18,6 +19,7 @@ internal object PrinterConnection {
         connect: (T) -> Unit,
         write: (T) -> Unit,
         connectTimeoutMillis: Long = 9_000,
+        pause: suspend (Long) -> Unit = { delay(it) },
     ) {
         val socket = try {
             open(secure, connect, connectTimeoutMillis)
@@ -37,7 +39,14 @@ internal object PrinterConnection {
         try {
             currentCoroutineContext().ensureActive()
             try {
-                withTimeout(15_000) { blocking(socket, write) }
+                withTimeout(15_000) {
+                    // Let the printer wake up, then keep SPP open while its receive buffer drains.
+                    pause(300)
+                    currentCoroutineContext().ensureActive()
+                    blocking(socket, write)
+                    pause(500)
+                    currentCoroutineContext().ensureActive()
+                }
             } catch (error: TimeoutCancellationException) {
                 currentCoroutineContext().ensureActive()
                 throw IOException(

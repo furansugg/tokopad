@@ -8,19 +8,30 @@ import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothSocket
 import android.content.Context
 import android.content.pm.PackageManager
+import android.graphics.BitmapFactory
 import android.os.Build
+import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.text.NumberFormat
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.util.Base64
 import java.util.Locale
 import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
+data class ReceiptBlock(
+    val text: String,
+    val emphasis: Boolean = false,
+    val large: Boolean = false,
+    val centered: Boolean = false,
+    val logo: String = "",
+)
+
 object Receipt {
-    fun text(sale: Sale, settings: ShopSettings): String {
+    fun blocks(sale: Sale, settings: ShopSettings): List<ReceiptBlock> {
         val id = settings.language.substringBefore('-').equals("id", ignoreCase = true)
         fun label(en: String, indonesian: String) = if (id) indonesian else en
         val locale = if (id) Locale.forLanguageTag("id-ID") else Locale.US
@@ -31,47 +42,54 @@ object Receipt {
             80 -> 48
             else -> throw IllegalArgumentException("Unsupported paper width: ${settings.paperWidth}")
         }
-        val result = StringBuilder()
+        val result = mutableListOf<ReceiptBlock>()
         fun length(value: String) = value.codePointCount(0, value.length)
-        fun line(value: String) {
+        fun line(value: String, emphasis: Boolean = false, large: Boolean = false, centered: Boolean = false) {
+            val columns = if (large) width / 2 else width
             for (raw in value.replace("\r\n", "\n").replace('\r', '\n').split('\n')) {
                 var remaining = raw.map { if (it.isISOControl()) ' ' else it }.joinToString("").trim()
-                while (length(remaining) > width) {
-                    val end = remaining.offsetByCodePoints(0, width)
+                while (length(remaining) > columns) {
+                    val end = remaining.offsetByCodePoints(0, columns)
                     val space = remaining.lastIndexOf(' ', end)
                     val cut = if (space in 1..end) space else end
-                    result.appendLine(remaining.substring(0, cut))
+                    result += ReceiptBlock(remaining.substring(0, cut), emphasis, large, centered)
                     remaining = remaining.substring(cut).trimStart()
                 }
-                result.appendLine(remaining)
+                result += ReceiptBlock(remaining, emphasis, large, centered)
             }
         }
-        fun optional(value: String) { if (value.isNotBlank()) line(value) }
+        fun optional(value: String, centered: Boolean = false) { if (value.isNotBlank()) line(value, centered = centered) }
         fun detail(name: String, value: String) { if (value.isNotBlank()) line("$name: $value") }
-        fun row(name: String, value: String) {
+        fun row(name: String, value: String, emphasis: Boolean = false) {
             val padding = width - length(name) - length(value)
             if (padding >= 1 && !name.contains('\n') && !value.contains('\n')) {
-                line(name + " ".repeat(padding) + value)
+                line(name + " ".repeat(padding) + value, emphasis = emphasis)
             } else {
-                line(name)
-                line(value)
+                line(name, emphasis = emphasis)
+                line(value, emphasis = emphasis)
             }
         }
         fun rule() = line("-".repeat(width))
         val date = DateTimeFormatter.ofPattern("dd MMM yyyy HH:mm", locale).withZone(ZoneId.of(sale.zoneId))
         val shop = sale.shop
-        optional(shop.shopName)
-        optional(shop.address)
-        optional(shop.contact)
-        optional(shop.header)
+        require(shop.headerMode in listOf("name", "logo", "both")) { "Unsupported receipt header mode" }
+        if (shop.headerMode != "name" && shop.logo.isNotBlank()) {
+            result += ReceiptBlock("", centered = true, logo = shop.logo)
+        }
+        if (shop.headerMode != "logo" && shop.shopName.isNotBlank()) {
+            line(shop.shopName, emphasis = true, centered = true)
+        }
+        optional(shop.address, centered = true)
+        optional(shop.contact, centered = true)
+        optional(shop.header, centered = true)
         rule()
         if (sale.cancelledAt != null) {
-            line("*** ${label("CANCELLED", "DIBATALKAN")} ***")
+            line("*** ${label("CANCELLED", "DIBATALKAN")} ***", emphasis = true)
             detail(label("Cancelled", "Dibatalkan"), date.format(Instant.ofEpochMilli(sale.cancelledAt)))
             detail(label("Reason", "Alasan"), sale.cancellationReason)
             rule()
         }
-        detail(label("Receipt", "Nota"), sale.number)
+        detail(label("Receipt", "Nota"), sale.receiptNumber)
         detail(label("Date", "Tanggal"), date.format(Instant.ofEpochMilli(sale.createdAt)))
         if (settings.showCustomer) {
             detail(label("Customer", "Pelanggan"), sale.customerName)
@@ -81,10 +99,10 @@ object Receipt {
         rule()
         for (item in sale.lines) {
             val product = item.product
-            line(product.name)
+            line(product.name, emphasis = true)
             val quantity = numbers.format(item.quantity)
             val unit = if (product.kind == ProductKind.PHYSICAL && product.unit.isNotBlank()) " ${product.unit}" else ""
-            row("$quantity$unit x ${money(product.price)}", money(Math.multiplyExact(item.quantity, product.price)))
+            if (product.kind != ProductKind.PHYSICAL) detail(label("Buyer", "Nama pembeli"), item.buyerName)
             when (product.kind) {
                 ProductKind.PHYSICAL -> Unit
                 ProductKind.PULSA -> {
@@ -94,8 +112,26 @@ object Receipt {
                 }
                 ProductKind.ELECTRICITY -> {
                     detail(label("Meter / customer ID", "Meter / ID pelanggan"), item.destination)
+                    detail("kWh", item.kwh)
+                    if (item.code.isNotBlank()) {
+                        line("Token:", emphasis = true, centered = true)
+                        val digits = item.code.filter { it in '0'..'9' }
+                        if (digits.isNotEmpty() && item.code.all { it in '0'..'9' || it == ' ' || it == '-' }) {
+                            val groups = digits.chunked(4)
+                            val perLine = (width / 2 + 1) / 5
+                            // Keep complete four-digit groups; the shorter first line balances 58 mm tokens.
+                            var start = 0
+                            var count = (groups.size % perLine).takeIf { it > 0 } ?: perLine
+                            while (start < groups.size) {
+                                line(groups.subList(start, start + count).joinToString(" "), emphasis = true, large = true, centered = true)
+                                start += count
+                                count = minOf(perLine, groups.size - start)
+                            }
+                        } else {
+                            line(item.code, emphasis = true, large = true, centered = true)
+                        }
+                    }
                     if (product.nominal > 0) detail(label("Nominal", "Nominal"), money(product.nominal))
-                    detail(label("Token", "Token"), item.code)
                 }
                 ProductKind.DATA -> {
                     detail(label("Phone", "Nomor tujuan"), item.destination)
@@ -118,11 +154,12 @@ object Receipt {
                 detail(label("Code", "Kode"), item.code)
             }
             detail(label("Note", "Catatan"), item.note)
+            row("$quantity$unit x ${money(product.price)}", money(Math.multiplyExact(item.quantity, product.price)))
         }
         rule()
         row(label("Subtotal", "Subtotal"), money(sale.subtotal))
         if (settings.showDiscount && sale.discount > 0) row(label("Discount", "Diskon"), "-${money(sale.discount)}")
-        row(label("TOTAL", "TOTAL"), money(sale.total))
+        row(label("TOTAL", "TOTAL"), money(sale.total), emphasis = true)
         val payment = when (sale.payment.lowercase(Locale.ROOT)) {
             "cash", "tunai" -> label("Cash", "Tunai")
             "noncash", "non_cash", "non-cash", "cashless", "nontunai", "non tunai" -> label("Non-cash", "Nontunai")
@@ -133,22 +170,75 @@ object Receipt {
         row(label("Change", "Kembalian"), money(Math.subtractExact(sale.paid, sale.total)))
         rule()
         optional(shop.footer)
-        return result.toString()
+        return result
     }
 
-    fun testText(settings: ShopSettings): String {
+    fun text(sale: Sale, settings: ShopSettings): String =
+        blocks(sale, settings).filter { it.logo.isEmpty() }.joinToString("\n", postfix = "\n") { it.text }
+
+    fun bytes(sale: Sale, settings: ShopSettings): ByteArray = ByteArrayOutputStream().apply {
+        write(byteArrayOf(0x1b, 0x40, 0x1b, 0x74, 0x00))
+        for (block in blocks(sale, settings)) {
+            write(byteArrayOf(0x1b, 0x61, if (block.centered) 1 else 0, 0x1b, 0x45, if (block.emphasis) 1 else 0, 0x1d, 0x21, if (block.large) 0x11 else 0))
+            if (block.logo.isNotEmpty()) write(raster(block.logo)) else write(ascii(block.text))
+            write(0x0a)
+        }
+        write(byteArrayOf(0x1b, 0x61, 0x00, 0x1b, 0x45, 0x00, 0x1d, 0x21, 0x00, 0x0a, 0x0a, 0x0a))
+    }.toByteArray()
+
+    private fun ascii(text: String): ByteArray {
+        // ponytail: ASCII subset of CP437; add tested code pages for richer printer glyphs.
+        val safe = StringBuilder()
+        text.codePoints().forEach { code ->
+            safe.append(when (code) {
+                10 -> '\n'
+                in 32..126 -> code.toChar()
+                else -> '?'
+            })
+        }
+        return safe.toString().toByteArray(Charsets.US_ASCII)
+    }
+
+    private fun raster(logo: String): ByteArray {
+        require(logo.length <= 32_768) { "Receipt logo must be at most 24 KiB" }
+        val png = Base64.getDecoder().decode(logo)
+        require(png.size <= 24_576 && png.size >= 8 && png.copyOfRange(0, 8).contentEquals(
+            byteArrayOf(0x89.toByte(), 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a),
+        )) { "Receipt logo must be a PNG of at most 24 KiB" }
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(png, 0, png.size, bounds)
+        require(bounds.outWidth in 1..384 && bounds.outHeight in 1..192) { "Receipt logo must fit 384 x 192 pixels" }
+        val bitmap = requireNotNull(BitmapFactory.decodeByteArray(png, 0, png.size)) { "Invalid receipt logo PNG" }
+        try {
+            val stride = (bitmap.width + 7) / 8
+            val data = ByteArray(stride * bitmap.height)
+            for (y in 0 until bitmap.height) for (x in 0 until bitmap.width) {
+                val pixel = bitmap.getPixel(x, y)
+                val alpha = pixel ushr 24
+                val luminance = (299 * (pixel shr 16 and 255) + 587 * (pixel shr 8 and 255) + 114 * (pixel and 255)) / 1000
+                if (alpha * (255 - luminance) > 127 * 255) {
+                    val offset = y * stride + x / 8
+                    data[offset] = (data[offset].toInt() or (0x80 ushr (x % 8))).toByte()
+                }
+            }
+            return byteArrayOf(0x1d, 0x76, 0x30, 0x00, stride.toByte(), (stride shr 8).toByte(), bitmap.height.toByte(), (bitmap.height shr 8).toByte()) + data
+        } finally {
+            bitmap.recycle()
+        }
+    }
+
+    fun testText(settings: ShopSettings): String = text(testSale(settings), settings)
+
+    private fun testSale(settings: ShopSettings): Sale {
         val id = settings.language.substringBefore('-').equals("id", ignoreCase = true)
         val name = if (id) "Cetak percobaan" else "Test print"
-        return text(
-            Sale(
-                id = 0, number = "TEST", createdAt = System.currentTimeMillis(),
-                zoneId = ZoneId.systemDefault().id,
-                lines = listOf(CartLine(Product(name = name, price = 10_000))),
-                customerId = null, customerName = "", customerPhone = "",
-                subtotal = 10_000, discount = 0, total = 10_000, payment = "cash", paid = 10_000,
-                shop = settings,
-            ),
-            settings,
+        return Sale(
+            id = 0, number = "TEST", createdAt = System.currentTimeMillis(),
+            zoneId = ZoneId.systemDefault().id,
+            lines = listOf(CartLine(Product(name = name, price = 10_000))),
+            customerId = null, customerName = "", customerPhone = "",
+            subtotal = 10_000, discount = 0, total = 10_000, payment = "cash", paid = 10_000,
+            shop = settings,
         )
     }
 
@@ -176,20 +266,19 @@ object Receipt {
         }
             .sortedBy { it.first }
 
-    suspend fun print(context: Context, address: String, text: String) = withPrinter(context, address) { socket ->
-        // ponytail: ASCII subset of CP437; add tested code pages for richer printer glyphs.
-        val safe = StringBuilder()
-        text.codePoints().forEach { code ->
-            safe.append(when (code) {
-                10 -> '\n'
-                in 32..126 -> code.toChar()
-                else -> '?'
-            })
-        }
+    suspend fun print(context: Context, address: String, text: String) = send(
+        context, address, byteArrayOf(0x1b, 0x40, 0x1b, 0x74, 0x00) + ascii(text) + byteArrayOf(0x0a, 0x0a, 0x0a),
+    )
+
+    suspend fun print(context: Context, address: String, sale: Sale, settings: ShopSettings) =
+        send(context, address, bytes(sale, settings))
+
+    suspend fun printTest(context: Context, settings: ShopSettings) =
+        print(context, settings.printerAddress, testSale(settings), settings)
+
+    private suspend fun send(context: Context, address: String, bytes: ByteArray) = withPrinter(context, address) { socket ->
         val output = socket.outputStream
-        output.write(byteArrayOf(0x1b, 0x40, 0x1b, 0x74, 0x00))
-        output.write(safe.toString().toByteArray(Charsets.US_ASCII))
-        output.write(byteArrayOf(0x0a, 0x0a, 0x0a))
+        output.write(bytes)
         output.flush()
     }
 

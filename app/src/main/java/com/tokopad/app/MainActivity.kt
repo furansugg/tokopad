@@ -14,8 +14,10 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.SystemBarStyle
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -55,7 +57,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            TokopadTheme { Tokopad() }
+            Tokopad()
         }
     }
 }
@@ -64,6 +66,7 @@ class MainActivity : ComponentActivity() {
 private fun Tokopad() {
     val context = LocalContext.current
     val store = remember { Store(context.applicationContext) }
+    DisposableEffect(store) { onDispose { store.close() } }
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
     var settings by remember { mutableStateOf(ShopSettings()) }
@@ -90,8 +93,15 @@ private fun Tokopad() {
     var settingsSection by rememberSaveable { mutableStateOf("general") }
     var printerStatus by remember { mutableStateOf("") }
     var pendingPrinterAction by remember { mutableStateOf<String?>(null) }
-    var pendingPrintText by remember { mutableStateOf("") }
+    var pendingPrintSale by remember { mutableStateOf<Sale?>(null) }
     val lang = settings.language
+    val dark = settings.theme == "dark" || (settings.theme == "system" && isSystemInDarkTheme())
+    LaunchedEffect(dark) {
+        (context as? ComponentActivity)?.enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.auto(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT) { dark },
+            navigationBarStyle = SystemBarStyle.auto(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT) { dark },
+        )
+    }
 
     suspend fun refresh() {
         val zone = java.time.ZoneId.systemDefault()
@@ -119,7 +129,7 @@ private fun Tokopad() {
         }
     }
 
-    fun performPrinterAction(action: String, text: String = "") = runTask {
+    fun performPrinterAction(action: String, sale: Sale? = null) = runTask {
         printerStatus = ""
         when (action) {
             "find" -> {
@@ -131,7 +141,8 @@ private fun Tokopad() {
                 printerStatus = "verified"
             }
             "print" -> {
-                Receipt.print(context, settings.printerAddress, text)
+                if (sale == null) Receipt.printTest(context, settings)
+                else Receipt.print(context, settings.printerAddress, sale, settings)
                 printerStatus = "sent"
                 snackbar.showSnackbar(l(lang, "Data sent. Check the paper before printing again.", "Data terkirim. Periksa kertas sebelum mencetak ulang."))
             }
@@ -145,7 +156,7 @@ private fun Tokopad() {
     val enableBluetooth = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         val action = pendingPrinterAction
         pendingPrinterAction = null
-        if (bluetoothEnabled() && action != null) performPrinterAction(action, pendingPrintText)
+        if (bluetoothEnabled() && action != null) performPrinterAction(action, pendingPrintSale)
         else error = l(lang, "Turn on Bluetooth to connect your printer.", "Aktifkan Bluetooth untuk menghubungkan printer.")
     }
     fun requestBluetoothEnable() {
@@ -163,10 +174,10 @@ private fun Tokopad() {
         } else if (!bluetoothEnabled()) requestBluetoothEnable()
         else {
             pendingPrinterAction = null
-            if (action != null) performPrinterAction(action, pendingPrintText)
+            if (action != null) performPrinterAction(action, pendingPrintSale)
         }
     }
-    fun requestPrinterAction(action: String, text: String = "") {
+    fun requestPrinterAction(action: String, sale: Sale? = null) {
         if (busy) return
         if (context.getSystemService(BluetoothManager::class.java)?.adapter == null) {
             error = l(lang, "Bluetooth is unavailable on this device.", "Bluetooth tidak tersedia di perangkat ini.")
@@ -180,10 +191,10 @@ private fun Tokopad() {
             return
         }
         pendingPrinterAction = action
-        pendingPrintText = text
+        pendingPrintSale = sale
         if (!hasBluetoothPermission()) bluetoothPermission.launch(arrayOf(Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.BLUETOOTH_SCAN))
         else if (!bluetoothEnabled()) requestBluetoothEnable()
-        else { pendingPrinterAction = null; performPrinterAction(action, text) }
+        else { pendingPrinterAction = null; performPrinterAction(action, sale) }
     }
 
     val bluetoothSettings = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
@@ -245,6 +256,7 @@ private fun Tokopad() {
     BackHandler(enabled = screen == "products") { screen = "dashboard" }
     BackHandler(enabled = screen == "more" || screen == "history" || (screen == "checkout" && cart.isEmpty())) { screen = "dashboard" }
 
+    TokopadTheme(theme = settings.theme) {
     Scaffold(
         snackbarHost = { SnackbarHost(snackbar) },
         bottomBar = {
@@ -269,7 +281,7 @@ private fun Tokopad() {
         Column(Modifier.fillMaxSize().padding(padding).imePadding()) {
             Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).padding(horizontal = 16.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Box(Modifier.size(28.dp).background(MaterialTheme.colorScheme.primary, RoundedCornerShape(6.dp)), contentAlignment = Alignment.Center) {
-                    PadIcon("receipt", Modifier.size(17.dp), Color.White)
+                    PadIcon("receipt", Modifier.size(17.dp), MaterialTheme.colorScheme.onPrimary)
                 }
                 Column(Modifier.weight(1f)) {
                     Text(settings.shopName, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -305,7 +317,7 @@ private fun Tokopad() {
                     "settings" -> SettingsScreen(settings, printers,
                         onSave = { value -> runTask { withContext(Dispatchers.IO) { store.saveSettings(value) }; refresh(); snackbar.showSnackbar(l(value.language, "Settings saved.", "Pengaturan tersimpan.")) } },
                         onFindPrinters = { requestPrinterAction("find") },
-                        onTestPrint = { requestPrinterAction("print", Receipt.testText(settings)) },
+                        onTestPrint = { requestPrinterAction("print") },
                         onExport = { backupWarning = "export" }, onImport = { backupWarning = "import" },
                         onSelectPrinter = { address -> runTask {
                             withContext(Dispatchers.IO) { store.saveSettings(settings.copy(printerAddress = address)) }
@@ -326,7 +338,7 @@ private fun Tokopad() {
     }
 
     selectedSale?.let { sale -> SaleDialog(sale, settings, busy, onDismiss = { selectedSale = null },
-        onPrint = { requestPrinterAction("print", Receipt.text(sale, settings)) },
+        onPrint = { requestPrinterAction("print", sale) },
         onCancel = { reason -> runTask {
             selectedSale = withContext(Dispatchers.IO) { store.cancelSale(sale.id, reason); store.sale(sale.id) }
             refresh()
@@ -354,13 +366,14 @@ private fun Tokopad() {
         text = { Column(Modifier.heightIn(max = 450.dp).verticalScroll(rememberScrollState())) {
             Text(l(lang, "Latest 500 transactions", "500 transaksi terbaru"))
             if (history.isEmpty()) Text(l(lang, "No transactions yet.", "Belum ada transaksi."))
-            history.forEach { sale -> TextButton(onClick = { customerHistory = null; selectedSale = sale }) { Text("${sale.number}\n${money(sale.total, lang)}" + if (sale.cancelledAt != null) " · " + l(lang, "Cancelled", "Dibatalkan") else "") } }
+            history.forEach { sale -> TextButton(onClick = { customerHistory = null; selectedSale = sale }) { Text("${sale.receiptNumber}\n${money(sale.total, lang)}" + if (sale.cancelledAt != null) " · " + l(lang, "Cancelled", "Dibatalkan") else "") } }
         } }, confirmButton = { TextButton(onClick = { customerHistory = null }) { Text(l(lang, "Close", "Tutup")) } }) }
     if (busy) Dialog(onDismissRequest = {}, properties = DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false)) {
         Surface(shape = MaterialTheme.shapes.large) { Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             CircularProgressIndicator()
             Text(l(lang, "Working…", "Sedang diproses…"))
         } }
+    }
     }
 }
 

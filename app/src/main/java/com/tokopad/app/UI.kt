@@ -3,6 +3,7 @@ package com.tokopad.app
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
@@ -23,9 +24,23 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 @Composable
-fun TokopadTheme(content: @Composable () -> Unit) {
+fun TokopadTheme(theme: String = "system", content: @Composable () -> Unit) {
+    val dark = theme == "dark" || (theme == "system" && isSystemInDarkTheme())
     MaterialTheme(
-        colorScheme = lightColorScheme(
+        colorScheme = if (dark) darkColorScheme(
+            primary = Color(0xFFFAFAFA), onPrimary = Color(0xFF18181B),
+            primaryContainer = Color(0xFF27272A), onPrimaryContainer = Color(0xFFFAFAFA),
+            secondary = Color(0xFFA1A1AA), onSecondary = Color(0xFF18181B),
+            secondaryContainer = Color(0xFF27272A), onSecondaryContainer = Color(0xFFFAFAFA),
+            tertiary = Color(0xFFA1A1AA), tertiaryContainer = Color(0xFF27272A),
+            background = Color(0xFF09090B), onBackground = Color(0xFFFAFAFA),
+            surface = Color(0xFF18181B), onSurface = Color(0xFFFAFAFA),
+            surfaceVariant = Color(0xFF27272A), onSurfaceVariant = Color(0xFFA1A1AA),
+            surfaceContainer = Color(0xFF18181B), surfaceContainerLow = Color(0xFF09090B),
+            surfaceContainerHigh = Color(0xFF27272A), surfaceContainerHighest = Color(0xFF3F3F46),
+            surfaceTint = Color.Transparent, outline = Color(0xFF71717A), outlineVariant = Color(0xFF3F3F46),
+            error = Color(0xFFFCA5A5), errorContainer = Color(0xFF450A0A),
+        ) else lightColorScheme(
             primary = Color(0xFF18181B), onPrimary = Color.White,
             primaryContainer = Color(0xFFF4F4F5), onPrimaryContainer = Color(0xFF18181B),
             secondary = Color(0xFF52525B), onSecondary = Color.White,

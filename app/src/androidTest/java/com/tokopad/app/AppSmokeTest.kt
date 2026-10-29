@@ -20,6 +20,7 @@ import java.io.File
 
 @RunWith(AndroidJUnit4::class)
 class AppSmokeTest {
+    private lateinit var electricityReceipt: Sale
     @get:Rule(order = 0)
     val sampleShop = object : ExternalResource() {
         override fun before() {
@@ -27,10 +28,12 @@ class AppSmokeTest {
                 store.saveSettings(ShopSettings(shopName = "The Daily Store"))
                 val notebook = Product(name = "Pocket notebook", category = "Stationery", price = 18000, stock = 24, trackStock = true).let { it.copy(id = store.saveProduct(it)) }
                 store.saveProduct(Product(name = "Internet 10 GB", price = 35000, kind = ProductKind.DATA, provider = "Telkomsel", packageName = "10 GB / 30 days"))
-                store.saveProduct(Product(name = "Electricity 50K", price = 52000, kind = ProductKind.ELECTRICITY, nominal = 50000, requiresCode = true))
-                val customer = Customer(name = "Nadia Putri", phone = "081234567890").let { it.copy(id = store.saveCustomer(it)) }
+                val electricity = Product(name = "Electricity 50K", price = 52000, kind = ProductKind.ELECTRICITY, nominal = 50000, requiresCode = true).let { it.copy(id = store.saveProduct(it)) }
+                val customer = Customer(name = "Nadia Putri", phone = "081234567890", meterNumber = "12345678901").let { it.copy(id = store.saveCustomer(it)) }
                 store.checkout(listOf(CartLine(notebook, 2)), customer, 0, "cash", 50000)
                 store.checkout(listOf(CartLine(notebook)), null, 0, "noncash", 18000)
+                electricityReceipt = store.checkout(listOf(CartLine(electricity, destination = customer.meterNumber,
+                    buyerName = customer.name, kwh = "33.5", code = "12345678901234567890", customerId = customer.id)), customer, 0, "cash", 60000)
             }
         }
     }
@@ -59,6 +62,11 @@ class AppSmokeTest {
         compose.onNodeWithText("Today").performClick()
         compose.onNodeWithText("Choose dates").assertIsDisplayed()
         compose.onNodeWithText("Cancel").performClick()
+
+        compose.onNodeWithText(electricityReceipt.receiptNumber).performScrollTo().performClick()
+        compose.onNodeWithText("Receipt", substring = false).assertIsDisplayed()
+        screenshot("invoice-pln")
+        compose.onNodeWithText("Close").performClick()
 
         compose.onNodeWithTag("nav-checkout").performClick()
         compose.onNodeWithText("Find a product").assertIsDisplayed()
@@ -90,6 +98,18 @@ class AppSmokeTest {
         compose.onNodeWithText("Find paired printers").performScrollTo().assertIsDisplayed()
         screenshot("printer")
         compose.onNodeWithTag("settings-general").performClick()
+
+        compose.onNodeWithText("Dark", useUnmergedTree = true).performScrollTo().performClick()
+        compose.onNodeWithText("Save settings").performClick()
+        waitForText("Settings")
+        screenshot("settings-dark")
+        compose.onNodeWithTag("nav-dashboard").performClick()
+        waitForText("Overview")
+        screenshot("home-dark")
+        navigate("Settings")
+        compose.onNodeWithText("Light", useUnmergedTree = true).performScrollTo().performClick()
+        compose.onNodeWithText("Save settings").performClick()
+        waitForText("Settings")
 
         compose.onNodeWithText("Indonesian").performScrollTo().performClick()
         compose.onNodeWithText("Simpan pengaturan").performClick()

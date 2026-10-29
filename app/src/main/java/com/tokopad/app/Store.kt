@@ -10,6 +10,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.security.MessageDigest
 import java.time.ZoneId
+import java.util.Base64
 import java.util.UUID
 
 /** Synchronous; call on an IO thread. Amounts are whole rupiah. */
@@ -114,12 +115,22 @@ class Store(context: Context) : java.io.Closeable {
         amount(paid, "Paid amount")
         require(payment in PAYMENTS) { "Payment must be cash or noncash" }
         customer?.let { validateCustomer(it, allowNew = true) }
+        lines.forEach { validateLine(it) }
+        // Assigned buyer IDs are snapshots, not part of the caller's retry identity.
+        // Keep the request digest through cancellation/backup: resolved sale customers can differ from the request.
+        val signature = digest(JSONArray().apply {
+            lines.forEach { put(JSONArray(listOf(it.product.id, it.product.price, it.quantity, it.destination, it.code, it.note, it.buyerName, it.kwh))) }
+            put(customer?.let { customerJson(it) } ?: JSONObject.NULL)
+            put(discount); put(payment); put(paid)
+        }.toString())
         return transaction { db ->
             db.query("sales", null, "number = ?", arrayOf(requestId), null, null, null).use { c ->
                 if (c.moveToFirst()) {
                     val existing = sale(c)
-                    fun signature(items: List<CartLine>) = items.map { listOf(it.product.id.toString(), it.product.price.toString(), it.quantity.toString(), it.destination, it.code, it.note) }
-                    require(signature(existing.lines) == signature(lines) && existing.discount == discount &&
+                    val storedSignature = JSONObject(c.string("data")).optionalString("checkoutSignature")
+                    fun legacySignature(items: List<CartLine>) = items.map { listOf(it.product.id.toString(), it.product.price.toString(), it.quantity.toString(), it.destination, it.code, it.note, it.buyerName, it.kwh) }
+                    require(if (storedSignature.isNotEmpty()) storedSignature == signature else
+                        legacySignature(existing.lines) == legacySignature(lines) && existing.discount == discount &&
                         existing.payment == payment && existing.paid == paid &&
                         existing.customerName == customer?.name.orEmpty() && existing.customerPhone == customer?.phone.orEmpty()) {
                         "Checkout request already used for a different sale; discard the cart and start again"
@@ -136,6 +147,10 @@ class Store(context: Context) : java.io.Closeable {
                 require(fresh.price == line.product.price) { "Price changed: ${fresh.name}; refresh the cart" }
                 val snapshot = line.copy(product = fresh)
                 validateLine(snapshot)
+                if (fresh.kind == ProductKind.ELECTRICITY) {
+                    require(snapshot.buyerName.isNotBlank()) { "Electricity buyer name is required" }
+                    require(snapshot.kwh.isNotEmpty()) { "Electricity kWh is required" }
+                }
                 subtotal = addAmount(subtotal, lineTotal(snapshot))
                 if (fresh.trackStock) {
                     db.execSQL("UPDATE products SET stock = stock - ? WHERE id = ? AND stock >= ?", arrayOf(line.quantity, fresh.id, line.quantity))
@@ -149,16 +164,51 @@ class Store(context: Context) : java.io.Closeable {
             require(discount <= subtotal) { "Discount exceeds subtotal" }
             val total = subtotal - discount
             require(if (payment == "cash") paid >= total else paid == total) { "Cash must cover total; noncash must equal total" }
-            val currentCustomer = customer?.takeIf { it.id > 0 }?.let { findCustomer(db, it.id) }
-            val customerSnapshot = currentCustomer ?: customer
+            val currentCustomer = customer?.takeIf { it.id > 0 }?.let {
+                findCustomer(db, it.id) ?: throw IllegalArgumentException("Customer no longer exists")
+            }
+            val selected = snapshots.map { line -> line.customerId?.let {
+                findCustomer(db, it) ?: throw IllegalArgumentException("Customer no longer exists")
+            } }
+            val buyers = db.query("customers", null, null, null, null, null, "id").use { c ->
+                buildList { while (c.moveToNext()) add(customer(c)) }.toMutableList()
+            }
+            fun saveBuyer(buyer: Customer): Customer {
+                validateCustomer(buyer, allowNew = true)
+                requireCapacity(db, "customers", MAX_CUSTOMERS)
+                val id = db.insertOrThrow("customers", null, ContentValues().apply { put("data", customerJson(buyer).toString()) })
+                validId(id)
+                return buyer.copy(id = id).also { buyers.add(it) }
+            }
+            val manualBuyer = currentCustomer ?: customer?.let { supplied ->
+                buyers.firstOrNull { it.name == supplied.name && it.phone == supplied.phone && it.meterNumber == supplied.meterNumber }
+                    ?: saveBuyer(supplied)
+            }
+            val savedLines = snapshots.mapIndexed { index, line ->
+                if (line.product.kind == ProductKind.PHYSICAL || line.buyerName.isBlank() || line.destination.isEmpty()) line
+                else {
+                    val electricity = line.product.kind == ProductKind.ELECTRICITY
+                    fun matches(buyer: Customer) = buyer.name == line.buyerName &&
+                        (if (electricity) buyer.meterNumber else buyer.phone) == line.destination
+                    val buyer = selected[index]?.takeIf { matches(it) } ?: buyers.firstOrNull { matches(it) }
+                        ?: saveBuyer(Customer(name = line.buyerName, phone = if (electricity) "" else line.destination,
+                            meterNumber = if (electricity) line.destination else ""))
+                    line.copy(customerId = buyer.id)
+                }
+            }
+            val customerSnapshot = manualBuyer ?: savedLines.firstOrNull {
+                it.product.kind != ProductKind.PHYSICAL && it.customerId != null
+            }?.customerId?.let { id -> buyers.first { it.id == id } }
             val sale = Sale(
                 id = 0, number = requestId, createdAt = System.currentTimeMillis(),
-                zoneId = ZoneId.systemDefault().id, lines = snapshots,
-                customerId = currentCustomer?.id, customerName = customerSnapshot?.name.orEmpty(),
+                zoneId = ZoneId.systemDefault().id, lines = savedLines,
+                customerId = customerSnapshot?.id, customerName = customerSnapshot?.name.orEmpty(),
                 customerPhone = customerSnapshot?.phone.orEmpty(), subtotal = subtotal, discount = discount,
                 total = total, payment = payment, paid = paid, shop = readSettings(db),
             )
-            val id = db.insertOrThrow("sales", null, saleValues(sale)).also { validId(it) }
+            val id = db.insertOrThrow("sales", null, saleValues(sale).apply {
+                put("data", saleJson(sale).put("checkoutSignature", signature).toString())
+            }).also { validId(it) }
             sale.copy(id = id)
         }
     }
@@ -167,8 +217,8 @@ class Store(context: Context) : java.io.Closeable {
         validRange(from, to)
         text(query, 100, "Search")
         return helper.readableDatabase.query(
-            "sales", null, "created_at >= ? AND created_at < ? AND instr(number, ?) > 0",
-            arrayOf(from.toString(), to.toString(), query), null, null, "created_at DESC, id DESC", "500",
+            "sales", null, "created_at >= ? AND created_at < ? AND (instr('TP-' || printf('%08d', id), ?) > 0 OR instr(number, ?) > 0)",
+            arrayOf(from.toString(), to.toString(), query, query), null, null, "created_at DESC, id DESC", "500",
         ).use { c -> buildList { while (c.moveToNext()) add(sale(c)) } }
     }
 
@@ -200,7 +250,10 @@ class Store(context: Context) : java.io.Closeable {
             val values = ContentValues().apply {
                 put("cancelled_at", timestamp)
                 put("cancellation_reason", reason)
-                put("data", saleJson(sale.copy(cancelledAt = timestamp, cancellationReason = reason)).toString())
+                val data = db.query("sales", arrayOf("data"), "id = ?", arrayOf(id.toString()), null, null, null).use { c ->
+                    check(c.moveToFirst()); JSONObject(c.string("data"))
+                }
+                put("data", data.put("cancelledAt", timestamp).put("cancellationReason", reason).toString())
             }
             check(db.update("sales", values, "id = ? AND cancelled_at IS NULL", arrayOf(id.toString())) == 1)
         }
@@ -220,7 +273,12 @@ class Store(context: Context) : java.io.Closeable {
         val customers = JSONArray()
         db.query("customers", null, null, null, null, null, "id").use { c -> while (c.moveToNext()) customers.put(customerJson(customer(c))) }
         val sales = JSONArray()
-        db.query("sales", null, null, null, null, null, "id").use { c -> while (c.moveToNext()) sales.put(saleJson(sale(c))) }
+        db.query("sales", null, null, null, null, null, "id").use { c -> while (c.moveToNext()) {
+            val json = saleJson(sale(c))
+            val signature = JSONObject(c.string("data")).optionalString("checkoutSignature")
+            if (signature.isNotEmpty()) json.put("checkoutSignature", signature)
+            sales.put(json)
+        } }
         val payload = JSONObject().put("products", products).put("customers", customers).put("sales", sales)
             .put("settings", settingsJson(readSettings(db).copy(printerAddress = ""))).toString()
         val result = JSONObject().put("version", 1).put("sha256", digest(payload)).put("payload", payload).toString()
@@ -240,7 +298,10 @@ class Store(context: Context) : java.io.Closeable {
             for (c in data.customers) db.insertOrThrow("customers", null, ContentValues().apply {
                 put("id", c.id); put("data", customerJson(c).toString())
             })
-            for (s in data.sales) db.insertOrThrow("sales", null, saleValues(s).apply { put("id", s.id) })
+            for (s in data.sales) db.insertOrThrow("sales", null, saleValues(s).apply {
+                put("id", s.id)
+                data.signatures[s.id]?.let { put("data", saleJson(s).put("checkoutSignature", it).toString()) }
+            })
             writeSettings(db, data.settings.copy(printerAddress = ""))
         }
     }
@@ -299,7 +360,7 @@ class Store(context: Context) : java.io.Closeable {
         /** Throws IllegalArgumentException for malformed, incompatible, or inconsistent backups. */
         fun validateBackup(text: String) { decodeBackup(text) }
 
-        private data class Backup(val products: List<Product>, val customers: List<Customer>, val sales: List<Sale>, val settings: ShopSettings)
+        private data class Backup(val products: List<Product>, val customers: List<Customer>, val sales: List<Sale>, val settings: ShopSettings, val signatures: Map<Long, String>)
 
         private fun decodeBackup(text: String): Backup {
             requireBackupSize(text)
@@ -314,7 +375,15 @@ class Store(context: Context) : java.io.Closeable {
                 val data = JSONObject(payload)
                 val products = data.objects("products", MAX_PRODUCTS).map { parseProduct(it).also { p -> validateProduct(p) } }
                 val customers = data.objects("customers", MAX_CUSTOMERS).map { parseCustomer(it).also { c -> validateCustomer(c) } }
-                val sales = data.objects("sales", MAX_SALES).map { parseSale(it).also { s -> validateSale(s) } }
+                val signatures = mutableMapOf<Long, String>()
+                val sales = data.objects("sales", MAX_SALES).map { json -> parseSale(json).also { s ->
+                    validateSale(s)
+                    if (json.has("checkoutSignature")) {
+                        val signature = json.string("checkoutSignature")
+                        require(signature.matches(Regex("[0-9a-f]{64}"))) { "Invalid checkout signature" }
+                        signatures[s.id] = signature
+                    }
+                } }
                 val settings = parseSettings(data.getJSONObject("settings")).also { validateSettings(it) }
                 require(products.map { it.id }.toSet().size == products.size) { "Duplicate product ID" }
                 require(customers.map { it.id }.toSet().size == customers.size) { "Duplicate customer ID" }
@@ -326,7 +395,7 @@ class Store(context: Context) : java.io.Closeable {
                     require(sale.customerId == null || sale.customerId in customerIds) { "Missing sale customer" }
                     require(sale.lines.all { it.product.id in productIds }) { "Missing sale product" }
                 }
-                return Backup(products, customers, sales, settings)
+                return Backup(products, customers, sales, settings, signatures)
             } catch (e: IllegalArgumentException) {
                 throw e
             } catch (e: Exception) {
@@ -394,6 +463,7 @@ class Store(context: Context) : java.io.Closeable {
             text(c.name, 200, "Customer name", required = true)
             text(c.phone, 64, "Phone")
             text(c.note, 2000, "Customer note", multiline = true)
+            if (c.meterNumber.isNotEmpty()) validateDestination(c.meterNumber)
         }
         private fun validateSettings(s: ShopSettings) {
             require(s.language in setOf("en", "id")) { "Unsupported language" }
@@ -405,6 +475,21 @@ class Store(context: Context) : java.io.Closeable {
             text(s.cashier, 200, "Cashier")
             require(s.paperWidth == 58 || s.paperWidth == 80) { "Paper width must be 58 or 80" }
             require(s.printerAddress.isEmpty() || s.printerAddress.matches(Regex("[0-9A-Fa-f]{2}(:[0-9A-Fa-f]{2}){5}"))) { "Invalid printer address" }
+            require(s.theme in setOf("system", "light", "dark")) { "Unsupported theme" }
+            require(s.headerMode in setOf("name", "logo", "both")) { "Unsupported receipt header mode" }
+            require(s.headerMode == "name" || s.logo.isNotEmpty()) { "Receipt header requires a logo" }
+            if (s.logo.isNotEmpty()) {
+                require(s.logo.length <= 32 * 1024) { "Logo exceeds 24 KiB" }
+                val bytes = Base64.getDecoder().decode(s.logo)
+                require(bytes.size in 33..(24 * 1024)) { "Logo must be a PNG of at most 24 KiB" }
+                require(bytes.take(16) == listOf(137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82).map { it.toByte() }) { "Logo must have a PNG IHDR header" }
+                fun dimension(offset: Int): Long = (offset until offset + 4).fold(0L) { value, i -> (value shl 8) or (bytes[i].toLong() and 255) }
+                require(dimension(16) in 1L..384L && dimension(20) in 1L..192L) { "Logo exceeds 384x192 pixels" }
+            }
+        }
+        private fun validateDestination(value: String) {
+            require(value.length in 3..64 && value.any { it in '0'..'9' } &&
+                value.all { it in '0'..'9' || it in "+() .-" }) { "A valid phone number or meter/customer ID is required" }
         }
         private fun validateLine(line: CartLine) {
             validateProduct(line.product)
@@ -412,9 +497,16 @@ class Store(context: Context) : java.io.Closeable {
             text(line.destination, 64, "Destination")
             text(line.code, 256, "Code")
             text(line.note, 1000, "Line note", multiline = true)
+            text(line.buyerName, 200, "Buyer name")
+            line.customerId?.let { validId(it) }
+            if (line.kwh.isNotEmpty()) {
+                require(line.kwh.matches(Regex("[0-9]{1,7}(\\.[0-9]{1,3})?")) &&
+                    line.kwh.toBigDecimal() > java.math.BigDecimal.ZERO && line.kwh.toBigDecimal() <= java.math.BigDecimal("1000000")) {
+                    "kWh must be positive, at most 1000000, with at most 3 decimal places"
+                }
+            }
             if (line.product.kind in setOf(ProductKind.PULSA, ProductKind.DATA, ProductKind.ELECTRICITY)) {
-                require(line.destination.length >= 3 && line.destination.any { it in '0'..'9' } &&
-                    line.destination.all { it in '0'..'9' || it in "+() .-" }) { "A valid phone number or meter/customer ID is required" }
+                validateDestination(line.destination)
             }
             require(!line.product.requiresCode || line.code.isNotBlank()) { "Product requires a code" }
             lineTotal(line)
@@ -446,14 +538,17 @@ class Store(context: Context) : java.io.Closeable {
             .put("trackStock", p.trackStock).put("stock", p.stock).put("provider", p.provider).put("packageName", p.packageName)
             .put("nominal", p.nominal).put("requiresCode", p.requiresCode).put("active", p.active)
         private fun customerJson(c: Customer) = JSONObject().put("id", c.id).put("name", c.name).put("phone", c.phone).put("note", c.note)
+            .put("meterNumber", c.meterNumber)
         private fun settingsJson(s: ShopSettings) = JSONObject().put("language", s.language).put("shopName", s.shopName)
             .put("address", s.address).put("contact", s.contact).put("header", s.header).put("footer", s.footer)
             .put("showCustomer", s.showCustomer).put("cashier", s.cashier).put("showDiscount", s.showDiscount)
             .put("paperWidth", s.paperWidth).put("printerAddress", s.printerAddress)
+            .put("theme", s.theme).put("headerMode", s.headerMode).put("logo", s.logo)
         private fun saleJson(s: Sale): JSONObject {
             val lines = JSONArray()
             for (line in s.lines) lines.put(JSONObject().put("product", productJson(line.product)).put("quantity", line.quantity)
-                .put("destination", line.destination).put("code", line.code).put("note", line.note))
+                .put("destination", line.destination).put("code", line.code).put("note", line.note)
+                .put("buyerName", line.buyerName).put("kwh", line.kwh).put("customerId", line.customerId ?: JSONObject.NULL))
             return JSONObject().put("id", s.id).put("number", s.number).put("createdAt", s.createdAt).put("zoneId", s.zoneId)
                 .put("lines", lines).put("customerId", s.customerId ?: JSONObject.NULL).put("customerName", s.customerName)
                 .put("customerPhone", s.customerPhone).put("subtotal", s.subtotal).put("discount", s.discount).put("total", s.total)
@@ -467,17 +562,19 @@ class Store(context: Context) : java.io.Closeable {
             packageName = o.string("packageName"), nominal = o.integer("nominal", 0, MAX_AMOUNT),
             requiresCode = o.boolean("requiresCode"), active = o.boolean("active"),
         )
-        private fun parseCustomer(o: JSONObject) = Customer(o.integer("id", 0, MAX_ID), o.string("name"), o.string("phone"), o.string("note"))
+        private fun parseCustomer(o: JSONObject) = Customer(o.integer("id", 0, MAX_ID), o.string("name"), o.string("phone"), o.string("note"), o.optionalString("meterNumber"))
         private fun parseSettings(o: JSONObject) = ShopSettings(
             language = o.string("language"), shopName = o.string("shopName"), address = o.string("address"), contact = o.string("contact"),
             header = o.string("header"), footer = o.string("footer"), showCustomer = o.boolean("showCustomer"),
             cashier = o.string("cashier"), showDiscount = o.boolean("showDiscount"), paperWidth = o.integer("paperWidth", 58, 80).toInt(),
             printerAddress = o.string("printerAddress"),
+            theme = o.optionalString("theme", "system"), headerMode = o.optionalString("headerMode", "name"), logo = o.optionalString("logo"),
         )
         private fun parseSale(o: JSONObject) = Sale(
             id = o.integer("id", 0, MAX_ID), number = o.string("number"), createdAt = o.integer("createdAt", 0, MAX_TIME), zoneId = o.string("zoneId"),
             lines = o.objects("lines", MAX_LINES).map { CartLine(parseProduct(it.getJSONObject("product")), it.integer("quantity", 1, MAX_QUANTITY),
-                it.string("destination"), it.string("code"), it.string("note")) },
+                it.string("destination"), it.string("code"), it.string("note"), it.optionalString("buyerName"), it.optionalString("kwh"),
+                if (it.has("customerId")) it.nullableInteger("customerId", 1, MAX_ID) else null) },
             customerId = o.nullableInteger("customerId", 1, MAX_ID), customerName = o.string("customerName"), customerPhone = o.string("customerPhone"),
             subtotal = o.integer("subtotal", 0, MAX_AMOUNT), discount = o.integer("discount", 0, MAX_AMOUNT), total = o.integer("total", 0, MAX_AMOUNT),
             payment = o.string("payment"), paid = o.integer("paid", 0, MAX_AMOUNT), shop = parseSettings(o.getJSONObject("shop")),
@@ -495,6 +592,7 @@ class Store(context: Context) : java.io.Closeable {
         private fun JSONObject.nullableInteger(key: String, min: Long, max: Long): Long? =
             if (get(key) === JSONObject.NULL) null else integer(key, min, max)
         private fun JSONObject.string(key: String): String = get(key).also { require(it is String) { "$key must be text" } } as String
+        private fun JSONObject.optionalString(key: String, default: String = ""): String = if (has(key)) string(key) else default
         private fun JSONObject.boolean(key: String): Boolean = get(key).also { require(it is Boolean) { "$key must be boolean" } } as Boolean
         private fun JSONObject.objects(key: String, max: Int): List<JSONObject> {
             val array = getJSONArray(key)

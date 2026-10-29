@@ -78,7 +78,7 @@ Antarmuka minimalis, nyaman, informatif, dan memakai bahasa sehari-hari. Operasi
 | Jenis | Data transaksi tambahan |
 | --- | --- |
 | Pulsa | Nomor tujuan, operator, nominal |
-| Token listrik | Nomor meter/ID pelanggan, nominal, token |
+| Token listrik | Nama pembeli, nomor meter/ID pelanggan, jumlah kWh, nominal, token |
 | Kuota internet | Nomor tujuan, operator, nama paket |
 | Voucher internet | Provider, nama paket, kode voucher |
 | Digital lainnya | Tujuan, keterangan, kode opsional |
@@ -95,6 +95,7 @@ Antarmuka minimalis, nyaman, informatif, dan memakai bahasa sehari-hari. Operasi
 ### 4.6. Pelanggan
 
 - Tambah, ubah, cari, dan hapus pelanggan.
+- Profil pelanggan menyimpan nomor meter selain telepon. Saat menambahkan produk digital, pelanggan tersimpan dapat mengisi nama dan tujuan otomatis; pelanggan baru disimpan secara atomik hanya setelah transaksi berhasil.
 - Nama wajib; nomor telepon dan catatan opsional.
 - Tampilkan transaksi terkait pelanggan.
 - Penghapusan pelanggan melepaskan hubungan profil tanpa menghapus transaksi.
@@ -130,6 +131,9 @@ Antarmuka minimalis, nyaman, informatif, dan memakai bahasa sehari-hari. Operasi
 - Teks panjang membungkus mengikuti lebar kertas; nilai total tidak terpotong.
 - Nota menggunakan bahasa aplikasi saat dicetak; nama produk dan teks kustom tidak diterjemahkan otomatis.
 - Snapshot item, harga, diskon, pembayaran, pelanggan, dan identitas toko disimpan saat transaksi selesai.
+- Header nota dapat memakai nama toko, logo, atau keduanya; header/footer dapat diedit. Logo monokrom disimpan lokal dengan batas 384 × 192 piksel dan 24 KiB PNG.
+- Nota menampilkan nomor transaksi singkat `TP-00000001`, bukan UUID internal. Nota PLN menempatkan token besar/tebal setelah identitas pembeli, meter, kWh, dan produk; rincian pembayaran berada di bawah token.
+- Tema aplikasi menyediakan Light, Dark, dan System; nota tetap memakai kertas putih dan tinta hitam.
 - Cetak ulang menggunakan snapshot tersebut; pengaturan presentasi saat ini seperti bahasa dan lebar kertas boleh berubah.
 - Nota pembatalan/cetak ulang transaksi batal menampilkan status batal dengan jelas.
 

@@ -19,7 +19,7 @@ data class Product(
     val active: Boolean = true,
 ) : java.io.Serializable
 
-data class Customer(val id: Long = 0, val name: String, val phone: String = "", val note: String = "") : java.io.Serializable
+data class Customer(val id: Long = 0, val name: String, val phone: String = "", val note: String = "", val meterNumber: String = "") : java.io.Serializable
 
 data class CartLine(
     val product: Product,
@@ -27,6 +27,9 @@ data class CartLine(
     val destination: String = "",
     val code: String = "",
     val note: String = "",
+    val buyerName: String = "",
+    val kwh: String = "",
+    val customerId: Long? = null,
 ) : java.io.Serializable
 
 data class ShopSettings(
@@ -41,6 +44,9 @@ data class ShopSettings(
     val showDiscount: Boolean = true,
     val paperWidth: Int = 58,
     val printerAddress: String = "",
+    val theme: String = "system",
+    val headerMode: String = "name",
+    val logo: String = "",
 ) : java.io.Serializable
 
 data class Sale(
@@ -60,7 +66,9 @@ data class Sale(
     val shop: ShopSettings,
     val cancelledAt: Long? = null,
     val cancellationReason: String = "",
-)
+) {
+    val receiptNumber: String get() = "TP-${id.toString().padStart(8, '0')}"
+}
 
 data class Dashboard(val revenue: Long = 0, val count: Long = 0) {
     val average: Long get() = if (count == 0L) 0 else revenue / count

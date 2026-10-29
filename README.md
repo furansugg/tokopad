@@ -15,17 +15,19 @@ The manual **Signed release** workflow builds an APK and AAB from `main`, using 
 ## Use
 
 1. Add products in **Products**. Enable stock tracking for physical items if needed. Configure provider/package/nominal and code requirements for digital items.
-2. Add customers if needed. Open **Checkout**, select products, enter service destinations/codes, review payment, complete the sale.
-3. In **Settings**, enter shop details, select English or Indonesian, configure receipt width, then save.
+2. Open **Checkout**, select a product. For PLN, choose a saved customer to fill the name/meter, or enter a new buyer; enter kWh and the token manually. New digital buyers are saved only when the sale completes successfully, together with the sale. Review payment, complete the sale.
+3. In **Settings → General**, enter shop details, choose English/Indonesian and System/Light/Dark theme. In **Receipt**, choose shop name, logo, or both; edit header/footer and paper width, then save. Logo images are copied into app data, reduced to monochrome (maximum 384 × 192), and included in backups. No broad photo-library permission is required.
 4. Open the printer shortcut in the header or **Settings → Printer**. Pair an ESC/POS Bluetooth Classic printer in Android settings. Refresh paired printers, select one (saved automatically), test the connection, then test print. Nearby-device permission and Bluetooth enablement are requested when needed. Connection tests close the socket afterward; printing establishes a fresh connection.
 5. View sales in **History**. Reprint without duplicating sales; cancel mistakes with a reason. Cancellation adjusts records/stock, not external payments.
 6. Export backups regularly. Keep backup files private: they contain customer details, tokens, and transactions, **without encryption**. Import first requires saving a safety backup, then confirmation to replace local data.
 
 Digital sales are manual records, not automatic provider fulfillment. Noncash payment entries are not payment verification. Mixed baskets render each item according to its service type. Printer compatibility depends on actual hardware; test both paper widths before relying on them. Secure SPP connection is attempted first, then insecure SPP only if connection establishment fails before writing. A failed/uncertain write is never automatically retried: inspect the paper before retrying. BLE-only printers are explicitly unsupported. Close other printer apps and disconnect other phones if connection fails.
 
+Printed receipts use short `TP-00000001` transaction numbers, not the internal checkout UUID. PLN receipts place buyer/meter/kWh details above a bold, enlarged token, followed by pricing/payment and the footer. Header/logo/footer are sale snapshots: changing branding affects new sales, not historical reprints. ESC/POS raster-logo and enlarged-text support depends on the printer. Printing allows a short connection warm-up and output drain before closing; this is a compatibility measure, not proof that a particular printer physically printed.
+
 ## Interface
 
-The native Compose interface follows [shadcn/ui](https://ui.shadcn.com/docs/components) visual references: zinc neutrals, thin borders, restrained corners, compact tables, segmented tabs, and clear primary actions. No React/WebView runtime or shadcn package is embedded. Checkout separates product selection from the cart/payment step; customer selection stays optional. Settings separate General, Receipt, Printer, and Data rather than one long form.
+The native Compose interface follows [shadcn/ui](https://ui.shadcn.com/docs/components) visual references: zinc neutrals, thin borders, restrained corners, compact tables, segmented tabs, and clear primary actions. No React/WebView runtime or shadcn package is embedded. Light/dark colors follow the saved choice or Android system theme. Checkout separates product selection from the cart/payment step; digital buyer details belong to each line. Settings separate General, Receipt, Printer, and Data rather than one long form.
 
 ## Development
 
