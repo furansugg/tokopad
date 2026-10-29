@@ -128,12 +128,12 @@ private fun Tokopad() {
             }
             "connect" -> {
                 Receipt.testConnection(context, settings.printerAddress)
-                printerStatus = l(lang, "Connection verified. Ready to print.", "Koneksi berhasil diuji. Siap mencetak.")
+                printerStatus = "verified"
             }
             "print" -> {
                 Receipt.print(context, settings.printerAddress, text)
-                printerStatus = l(lang, "Data sent. Check the paper before printing again.", "Data terkirim. Periksa kertas sebelum mencetak ulang.")
-                snackbar.showSnackbar(printerStatus)
+                printerStatus = "sent"
+                snackbar.showSnackbar(l(lang, "Data sent. Check the paper before printing again.", "Data terkirim. Periksa kertas sebelum mencetak ulang."))
             }
         }
     }
@@ -161,6 +161,10 @@ private fun Tokopad() {
     }
     fun requestPrinterAction(action: String, text: String = "") {
         if (busy) return
+        if (context.getSystemService(BluetoothManager::class.java)?.adapter == null) {
+            error = l(lang, "Bluetooth is unavailable on this device.", "Bluetooth tidak tersedia di perangkat ini.")
+            return
+        }
         if (action != "find" && settings.printerAddress.isBlank()) {
             selectedSale = null
             settingsSection = "printer"
@@ -293,11 +297,16 @@ private fun Tokopad() {
                         onSelectPrinter = { address -> runTask {
                             withContext(Dispatchers.IO) { store.saveSettings(settings.copy(printerAddress = address)) }
                             settings = settings.copy(printerAddress = address)
-                            printerStatus = l(lang, "Printer saved. Test the connection next.", "Printer tersimpan. Uji koneksi selanjutnya.")
+                            printerStatus = "selected"
                         } },
                         onConnectPrinter = { requestPrinterAction("connect") },
                         onOpenBluetooth = { bluetoothSettings.launch(Intent(Settings.ACTION_BLUETOOTH_SETTINGS)) },
-                        printerStatus = printerStatus, section = settingsSection, onSection = { settingsSection = it })
+                        printerStatus = when (printerStatus) {
+                            "verified" -> l(lang, "Connection verified. Ready to print.", "Koneksi berhasil diuji. Siap mencetak.")
+                            "sent" -> l(lang, "Data sent. Check the paper before printing again.", "Data terkirim. Periksa kertas sebelum mencetak ulang.")
+                            "selected" -> l(lang, "Printer saved. Test the connection next.", "Printer tersimpan. Uji koneksi selanjutnya.")
+                            else -> printerStatus
+                        }, section = settingsSection, onSection = { settingsSection = it })
                 }
             }
         }
@@ -387,6 +396,7 @@ internal fun operationError(error: Exception, language: String): String {
         message.contains("Bluetooth address") -> "Pilih printer Bluetooth yang sudah dipasangkan. Pilihan langsung tersimpan."
         message.contains("BLE", true) -> "Printer ini hanya mendukung BLE. Tokopad saat ini memerlukan Bluetooth Classic ESC/POS. Periksa mode printer atau gunakan printer Classic."
         message.contains("not paired", true) || message.contains("not bonded", true) -> "Printer belum dipasangkan. Buka pengaturan Bluetooth Android, pasangkan printer, lalu cari kembali."
+        message.contains("Printer write", true) -> "Pengiriman nota gagal atau melewati batas waktu. Nota mungkin tercetak sebagian. Periksa kertas sebelum mencoba lagi."
         message.contains("connect", true) && error is java.io.IOException -> "Koneksi printer gagal. Pastikan printer menyala, dekat, tidak dipakai aplikasi/perangkat lain, lalu uji koneksi lagi. Jika tetap gagal, kirim model printer dan detail error: $message"
         message.contains("backup", true) || message.contains("JSON", true) -> "Cadangan tidak valid, rusak, terlalu besar, atau versinya tidak didukung. Data lama tidak diubah."
         message.contains("Cash must cover") -> "Pembayaran tunai harus mencukupi total; nontunai harus sama dengan total."

@@ -574,20 +574,20 @@ fun SettingsScreen(
                                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                             Text(l(language, "Connection status", "Status koneksi"), style = MaterialTheme.typography.labelLarge)
-                            Text(printerStatus.ifBlank { l(language, "Not connected", "Belum terhubung") },
+                            Text(printerStatus.ifBlank { l(language, "Not tested", "Belum diuji") },
                                 style = MaterialTheme.typography.bodyMedium)
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Button(onClick = onConnectPrinter, enabled = settings.printerAddress.isNotBlank(),
                                     modifier = Modifier.weight(1f).heightIn(min = 48.dp), shape = RoundedCornerShape(8.dp)) {
-                                    Text(l(language, "Connect", "Hubungkan"))
+                                    Text(l(language, "Test connection", "Uji koneksi"))
                                 }
                                 OutlinedButton(onClick = onTestPrint, enabled = settings.printerAddress.isNotBlank(),
                                     modifier = Modifier.weight(1f).heightIn(min = 48.dp), shape = RoundedCornerShape(8.dp)) {
                                     Text(l(language, "Test print", "Cetak tes"))
                                 }
                             }
-                            Text(l(language, "Connection and test printing use the saved printer and receipt settings.",
-                                "Koneksi dan cetak percobaan memakai printer dan pengaturan nota tersimpan."),
+                            Text(l(language, "The connection test sends no receipt. Printing reconnects to the saved printer.",
+                                "Uji koneksi tidak mencetak nota. Saat mencetak, aplikasi menghubungkan ulang printer tersimpan."),
                                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         SettingsGroup(l(language, "Paired printers", "Printer yang dipasangkan"), "search") {

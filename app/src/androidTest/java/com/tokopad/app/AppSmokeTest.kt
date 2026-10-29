@@ -63,6 +63,12 @@ class AppSmokeTest {
         compose.onNodeWithTag("nav-checkout").performClick()
         compose.onNodeWithText("Find a product").assertIsDisplayed()
         screenshot("checkout")
+        compose.onNodeWithText("Pocket notebook").performClick()
+        compose.onNodeWithText("Add").performClick()
+        compose.onNodeWithText("View cart").performClick()
+        screenshot("cart")
+        compose.onNodeWithTag("nav-products").performClick()
+        compose.onNodeWithText("Discard").performClick()
 
         navigate("Products")
         compose.onNodeWithText("Add product").assertIsDisplayed()
@@ -86,7 +92,7 @@ class AppSmokeTest {
         compose.onNodeWithTag("settings-general").performClick()
 
         compose.onNodeWithText("Indonesian").performScrollTo().performClick()
-        compose.onNodeWithText("Simpan pengaturan").performScrollTo().performClick()
+        compose.onNodeWithText("Simpan pengaturan").performClick()
         waitForText("Pengaturan")
 
         navigate("Beranda")
