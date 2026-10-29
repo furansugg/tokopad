@@ -2,6 +2,8 @@ package com.tokopad.app
 
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
@@ -125,6 +127,32 @@ class CheckoutUiTest {
             assertEquals("noncash", completedPayment)
             assertEquals(product.price, completedPaid)
             assertEquals(listOf(CartLine(product)), cart.value)
+        }
+    }
+
+    @Test
+    fun checkoutDraftSurvivesSavedStateRestoration() {
+        val restoration = StateRestorationTester(compose)
+        restoration.setContent {
+            val savedCart = rememberSaveable { mutableStateOf(listOf(CartLine(product, 2))) }
+            MaterialTheme {
+                CheckoutScreen(listOf(product), emptyList(), savedCart.value, "en", false,
+                    onCart = { savedCart.value = it },
+                    onComplete = { _, discount, payment, paid ->
+                        completedDiscount = discount; completedPayment = payment; completedPaid = paid
+                    })
+            }
+        }
+        checkoutNode("Discount (Rp)").performTextReplacement("500")
+        checkoutNode("Cash received (Rp)").performTextReplacement("5000")
+        restoration.emulateSavedInstanceStateRestore()
+        checkoutNode("Total: ${money(4_500, "en")}").assertIsDisplayed()
+        checkoutNode("Review sale").assertIsEnabled().performClick()
+        compose.onNodeWithText("Complete sale").performClick()
+        compose.runOnIdle {
+            assertEquals(500L, completedDiscount)
+            assertEquals("cash", completedPayment)
+            assertEquals(5_000L, completedPaid)
         }
     }
 }

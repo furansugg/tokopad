@@ -40,18 +40,18 @@ jobs:
           bytes=$(stat -c%s "$apk")
           echo "Release APK: $bytes bytes" >> "$GITHUB_STEP_SUMMARY"
           test "$bytes" -le 26214400
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         if: always()
         with:
           name: android-reports
           path: app/build/reports/
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         if: github.event_name != 'pull_request'
         with:
           name: tokopad-debug-apk
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         if: github.event_name != 'pull_request'
         with:
           name: tokopad-release-unsigned
@@ -86,12 +86,12 @@ jobs:
           script: |
             gradle --no-daemon connectedDebugAndroidTest -Pandroid.injected.androidTest.leaveApksInstalledAfterRun=true
             adb pull /sdcard/Android/data/com.tokopad.app/files/screenshots ./screenshots
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         if: always()
         with:
           name: database-test-reports
           path: app/build/reports/androidTests/
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         if: always()
         with:
           name: app-screenshots
