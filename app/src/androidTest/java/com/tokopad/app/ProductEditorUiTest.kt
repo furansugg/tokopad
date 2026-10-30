@@ -1,5 +1,6 @@
 package com.tokopad.app
 
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -108,6 +109,21 @@ class ProductEditorUiTest {
         compose.runOnIdle {
             assertEquals(product.copy(kind = ProductKind.DATA, name = "Updated PLN"), saved)
         }
+    }
+
+    @Test fun switchingNewProductType_clearsOnlyAutomaticPlnProvider() {
+        showEditor()
+        selectKind(ProductKind.ELECTRICITY)
+        compose.onNodeWithTag("product-provider").performScrollTo().assertTextContains("PLN")
+        selectKind(ProductKind.DATA)
+        val provider = compose.onNodeWithTag("product-provider").performScrollTo().fetchSemanticsNode()
+        assertEquals("", provider.config[SemanticsProperties.EditableText].text)
+        selectKind(ProductKind.ELECTRICITY)
+        replace("product-provider", "Custom provider")
+        selectKind(ProductKind.DATA)
+        compose.onNodeWithTag("product-provider").performScrollTo().assertTextContains("Custom provider")
+        selectKind(ProductKind.ELECTRICITY)
+        compose.onNodeWithTag("product-provider").performScrollTo().assertTextContains("Custom provider")
     }
 
     @Test fun invalidNamesAmountsAndStock_rejectedBeforeSave_acceptsStorageBoundaries() {

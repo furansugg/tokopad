@@ -289,6 +289,7 @@ private fun ProductEditor(product: Product, language: String, onDismiss: () -> U
     var cost by rememberSaveable(product) { mutableStateOf(product.cost?.toString().orEmpty()) }
     var stock by rememberSaveable(product) { mutableStateOf(product.stock.toString()) }
     var nominal by rememberSaveable(product) { mutableStateOf(product.nominal.toString()) }
+    var automaticProvider by rememberSaveable(product) { mutableStateOf(false) }
     var attempted by remember(product) { mutableStateOf(false) }
     var kindsOpen by remember { mutableStateOf(false) }
     var pendingStockReset by remember { mutableStateOf<Product?>(null) }
@@ -342,7 +343,9 @@ private fun ProductEditor(product: Product, language: String, onDismiss: () -> U
                     DropdownMenu(expanded = kindsOpen, onDismissRequest = { kindsOpen = false }) {
                         ProductKind.values().forEach { kind ->
                             DropdownMenuItem(text = { Text(kindLabel(kind, language)) }, modifier = Modifier.testTag("product-kind-${kind.name}"), onClick = {
-                                draft = draft.copy(kind = kind, provider = if (product.id == 0L && kind == ProductKind.ELECTRICITY && draft.provider.isBlank()) "PLN" else draft.provider)
+                                val provider = if (automaticProvider && kind != ProductKind.ELECTRICITY) "" else draft.provider
+                                automaticProvider = product.id == 0L && kind == ProductKind.ELECTRICITY && (provider.isBlank() || automaticProvider)
+                                draft = draft.copy(kind = kind, provider = if (automaticProvider) "PLN" else provider)
                                 kindsOpen = false
                             })
                         }
@@ -363,7 +366,7 @@ private fun ProductEditor(product: Product, language: String, onDismiss: () -> U
                     if (draft.trackStock) ManagementField(stock, { stock = it }, l(language, "Stock (whole units)", "Stok (jumlah bulat)"),
                         numberError(stock, Store.MAX_QUANTITY), KeyboardType.Number, modifier = Modifier.testTag("product-stock"))
                 } else {
-                    ManagementField(draft.provider, { draft = draft.copy(provider = it) },
+                    ManagementField(draft.provider, { draft = draft.copy(provider = it); automaticProvider = false },
                         l(language, "Operator / provider (optional)", "Operator / penyedia (opsional)"), providerError,
                         modifier = Modifier.testTag("product-provider"))
                     if (hasPackage) ManagementField(draft.packageName, { draft = draft.copy(packageName = it) },
