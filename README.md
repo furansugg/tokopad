@@ -33,6 +33,8 @@ Launcher and header use a lightweight vector interpretation of the supplied Toko
 
 Digital checkout previews up to three saved buyers in a bordered panel; search covers all saved names, phones and meter numbers. Selecting a buyer fills the form and collapses results; “Choose another buyer” reopens them. Busy dialogs center the indicator and message, including at larger font sizes.
 
+PLN checkout includes a Copy button beside the meter/customer ID field. It copies the current value (including leading zeros), also after manual edits, and is disabled when empty.
+
 Japanese and other non-ASCII receipt lines are rendered using Android fonts and printed as monochrome ESC/POS raster images; ASCII lines keep the lightweight text path. Printer code-page/Japanese-font support is not required, but raster printing must be supported. Glyph coverage depends on Android's installed fonts; raster-heavy receipts send more data and may print slower. No fonts are downloaded.
 
 The native Compose interface follows [shadcn/ui](https://ui.shadcn.com/docs/components) visual references: zinc neutrals, thin borders, restrained corners, compact tables, segmented tabs, and clear primary actions. No React/WebView runtime or shadcn package is embedded. Light/dark colors follow the saved choice or Android system theme. Checkout separates product selection from the cart/payment step; digital buyer details belong to each line. Settings separate General, Receipt, Printer, and Data rather than one long form.

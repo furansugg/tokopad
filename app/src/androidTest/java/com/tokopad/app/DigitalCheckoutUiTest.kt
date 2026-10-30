@@ -1,5 +1,7 @@
 package com.tokopad.app
 
+import android.content.ClipboardManager
+import androidx.test.platform.app.InstrumentationRegistry
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
@@ -72,6 +74,26 @@ class DigitalCheckoutUiTest {
             assertEquals(1L, line.quantity)
             assertEquals(0, completions)
         }
+    }
+
+    @Test
+    fun meterCopy_copiesSelectedBuyerAndEditedValue_preservesLeadingZeros() {
+        showCheckout(customers = listOf(buyer.copy(meterNumber = "00123456789")))
+        compose.onNodeWithTag("digital-copy-meter").performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithTag("digital-buyer-${buyer.id}").performScrollTo().performClick()
+        fun copyAndCheck(expected: String) {
+            compose.onNodeWithTag("digital-copy-meter").performScrollTo().assertIsEnabled().performClick()
+            compose.runOnIdle {
+                val clipboard = InstrumentationRegistry.getInstrumentation().targetContext.getSystemService(ClipboardManager::class.java)
+                assertEquals(expected, clipboard.primaryClip?.getItemAt(0)?.text?.toString())
+            }
+        }
+        copyAndCheck("00123456789")
+        replace("digital-destination", "00987654321")
+        copyAndCheck("00987654321")
+        replace("digital-destination", "")
+        compose.onNodeWithTag("digital-copy-meter").assertIsNotEnabled()
+        compose.runOnIdle { assertEquals(0, completions); assertEquals(emptyList<CartLine>(), cart.value) }
     }
 
     @Test

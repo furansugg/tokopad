@@ -1,9 +1,13 @@
 package com.tokopad.app
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.res.Configuration
 import android.graphics.BitmapFactory
 import android.os.LocaleList
+import android.os.Build
 import android.util.Base64
+import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -25,6 +29,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
@@ -371,6 +376,7 @@ fun CheckoutScreen(products: List<Product>, customers: List<Customer>, cart: Lis
 
 @Composable
 private fun AddLineDialog(product: Product, customers: List<Customer>, language: String, initialLine: CartLine? = null, maxQuantity: Long = 1_000_000, onDismiss: () -> Unit, onAdd: (CartLine) -> Unit) {
+    val context = LocalContext.current
     var quantity by rememberSaveable(product.id, initialLine) { mutableStateOf((initialLine?.quantity ?: 1).toString()) }
     var destination by rememberSaveable(product.id, initialLine) { mutableStateOf(initialLine?.destination.orEmpty()) }
     var code by rememberSaveable(product.id, initialLine) { mutableStateOf(initialLine?.code.orEmpty()) }
@@ -429,7 +435,16 @@ private fun AddLineDialog(product: Product, customers: List<Customer>, language:
                     }
                 }
                 OutlinedTextField(buyerName, { buyerName = it.take(100); customerId = null }, Modifier.fillMaxWidth().testTag("digital-buyer-name"), shape = RoundedCornerShape(8.dp), label = { Text(if (electricity) l(language, "Customer name", "Nama pelanggan") else l(language, "Customer name (optional)", "Nama pelanggan (opsional)")) }, supportingText = { if (electricity) Text(l(language, "Required", "Wajib diisi")) }, singleLine = true)
-                OutlinedTextField(destination, { destination = it.take(64); customerId = null }, Modifier.fillMaxWidth().testTag("digital-destination"), shape = RoundedCornerShape(8.dp), label = { Text(if (electricity) l(language, "Meter / customer ID", "Nomor meter / ID pelanggan") else l(language, "Destination", "Tujuan")) }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone), singleLine = true, supportingText = { if (needsDestination) Text(l(language, "Required: 3–64 characters; digits and phone punctuation only.", "Wajib: 3–64 karakter; hanya angka dan tanda baca telepon.")) })
+                OutlinedTextField(destination, { destination = it.take(64); customerId = null }, Modifier.fillMaxWidth().testTag("digital-destination"), shape = RoundedCornerShape(8.dp), label = { Text(if (electricity) l(language, "Meter / customer ID", "Nomor meter / ID pelanggan") else l(language, "Destination", "Tujuan")) }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone), singleLine = true,
+                    trailingIcon = {
+                        if (electricity) TextButton(enabled = destination.isNotBlank(), modifier = Modifier.testTag("digital-copy-meter").semantics { contentDescription = l(language, "Copy meter number", "Salin nomor meter") }, onClick = {
+                            context.getSystemService(ClipboardManager::class.java).setPrimaryClip(
+                                ClipData.newPlainText(l(language, "Meter number", "Nomor meter"), destination.trim()),
+                            )
+                            if (Build.VERSION.SDK_INT < 33) Toast.makeText(context, l(language, "Meter number copied.", "Nomor meter disalin."), Toast.LENGTH_SHORT).show()
+                        }) { Text(l(language, "Copy", "Salin")) }
+                    },
+                    supportingText = { if (needsDestination) Text(l(language, "Required: 3–64 characters; digits and phone punctuation only.", "Wajib: 3–64 karakter; hanya angka dan tanda baca telepon.")) })
                 if (electricity) OutlinedTextField(kwh, { kwh = it.take(20) }, Modifier.fillMaxWidth().testTag("digital-kwh"), shape = RoundedCornerShape(8.dp), label = { Text(l(language, "Energy (kWh)", "Energi (kWh)")) }, supportingText = { Text(l(language, "Required: 0–1,000,000, greater than zero; up to 3 decimals.", "Wajib: 0–1.000.000, lebih dari nol; maksimal 3 desimal.")) }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true, isError = kwh.isNotBlank() && !validKwh)
                 OutlinedTextField(code, { code = it.take(200) }, Modifier.fillMaxWidth().testTag("digital-code"), shape = RoundedCornerShape(8.dp), label = { Text(l(language, "Token / voucher code", "Token / kode voucher")) }, supportingText = { Text(if (product.requiresCode) l(language, "Required", "Wajib diisi") else l(language, "Optional", "Opsional")) })
                 OutlinedTextField(note, { note = it.take(500) }, Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), label = { Text(l(language, "Note (optional)", "Catatan (opsional)")) })
