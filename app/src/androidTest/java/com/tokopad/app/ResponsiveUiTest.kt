@@ -16,10 +16,12 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.isDialog
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import org.junit.Assert.assertEquals
@@ -110,6 +112,21 @@ class ResponsiveUiTest {
         assertEquals(dialog.center.x, progress.center.x, 1f)
         assertEquals(dialog.center.x, label.center.x, 1f)
         assertEquals(progress.top - dialog.top, dialog.bottom - label.bottom, 1f)
+    }
+
+    @Test fun productEditor_largeFonts_keyboardKeepsSaveAndFieldsReachable() {
+        showNarrowScreen { ProductsScreen(emptyList(), "id") { _, _ -> } }
+        compose.onNodeWithText("Tambah produk").performClick()
+        compose.onNodeWithTag("product-kind").performScrollTo().performClick()
+        compose.onNodeWithTag("product-kind-ELECTRICITY").performScrollTo().performClick()
+        listOf("product-kind", "product-name", "product-price", "product-provider", "product-nominal", "product-cost", "product-category")
+            .forEach { compose.onNodeWithTag(it).performScrollTo().assertIsDisplayed() }
+        compose.onNodeWithTag("product-price").performScrollTo().performClick().performTextReplacement("52000")
+        val save = compose.onNodeWithTag("product-save").assertIsDisplayed().assertHasClickAction().fetchSemanticsNode().boundsInRoot
+        val dialog = compose.onNode(isDialog()).fetchSemanticsNode().boundsInRoot
+        assertTrue(save.left >= dialog.left && save.right <= dialog.right && save.bottom <= dialog.bottom)
+        compose.onNodeWithText("Batal").assertIsDisplayed().performClick()
+        compose.onNodeWithTag("product-editor").assertDoesNotExist()
     }
 
     @Test fun indonesianSettingsTabsFillWidthEvenlyAndLanguageUsesSelection() {

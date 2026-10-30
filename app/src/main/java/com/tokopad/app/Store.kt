@@ -374,8 +374,8 @@ class Store(context: Context) : java.io.Closeable {
     }
 
     companion object {
-        private const val MAX_AMOUNT = 1_000_000_000_000L
-        private const val MAX_QUANTITY = 1_000_000_000L
+        internal const val MAX_AMOUNT = 1_000_000_000_000L
+        internal const val MAX_QUANTITY = 1_000_000_000L
         private const val MAX_ID = 1_000_000_000_000_000L
         private const val MAX_TIME = 253_402_300_799_999L
         private const val MAX_PRODUCTS = 10_000

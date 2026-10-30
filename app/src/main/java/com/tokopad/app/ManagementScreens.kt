@@ -60,6 +60,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
@@ -78,8 +79,8 @@ private val managementSurface: Color @Composable get() = MaterialTheme.colorSche
 private val managementBackground: Color @Composable get() = MaterialTheme.colorScheme.background
 private val managementMuted: Color @Composable get() = MaterialTheme.colorScheme.surfaceVariant
 
-private fun managementNumber(text: String): Long? =
-    text.takeIf { it.isNotEmpty() && it.all { digit -> digit in '0'..'9' } }?.toLongOrNull()
+private fun managementNumber(text: String, max: Long = Long.MAX_VALUE): Long? =
+    text.takeIf { it.isNotEmpty() && it.all { digit -> digit in '0'..'9' } }?.toLongOrNull()?.takeIf { it <= max }
 
 private fun validManagementMeter(value: String): Boolean = value.isEmpty() ||
     (value.length in 3..64 && value.any { it in '0'..'9' } && value.all { it in '0'..'9' || it in "+() .-" })
@@ -91,6 +92,10 @@ internal fun managementInputSelfCheck() {
     check(managementNumber(Long.MAX_VALUE.toString()) == Long.MAX_VALUE)
     listOf("", "-1", "+1", "1.5", " 1", "1e3", "１２", "9223372036854775808").forEach {
         check(managementNumber(it) == null)
+    }
+    for (max in listOf(Store.MAX_AMOUNT, Store.MAX_QUANTITY)) {
+        check(managementNumber(max.toString(), max) == max)
+        check(managementNumber((max + 1).toString(), max) == null)
     }
     listOf("", "123", "01234567890", "12345-67890", "1".repeat(64)).forEach { check(validManagementMeter(it)) }
     listOf("12", "1".repeat(65), "abcde", "１２３４５", "-----", "1234\n").forEach {
@@ -115,17 +120,19 @@ private fun ManagementField(
     error: String? = null,
     keyboard: KeyboardType = KeyboardType.Text,
     multiline: Boolean = false,
+    hint: String? = null,
+    modifier: Modifier = Modifier,
 ) {
     OutlinedTextField(
         value = value,
         onValueChange = onChange,
         label = { Text(label) },
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth(),
         singleLine = !multiline,
         minLines = if (multiline) 2 else 1,
         keyboardOptions = KeyboardOptions(keyboardType = keyboard),
         isError = error != null,
-        supportingText = if (error == null) null else ({ Text(error) }),
+        supportingText = if (error == null && hint == null) null else ({ Text(error ?: hint.orEmpty()) }),
         shape = RoundedCornerShape(8.dp),
         colors = OutlinedTextFieldDefaults.colors(
             focusedContainerColor = managementSurface,
@@ -284,83 +291,134 @@ private fun ProductEditor(product: Product, language: String, onDismiss: () -> U
     var nominal by rememberSaveable(product) { mutableStateOf(product.nominal.toString()) }
     var attempted by remember(product) { mutableStateOf(false) }
     var kindsOpen by remember { mutableStateOf(false) }
+    var pendingStockReset by remember { mutableStateOf<Product?>(null) }
     val physical = draft.kind == ProductKind.PHYSICAL
+    val hasPackage = draft.kind in listOf(ProductKind.DATA, ProductKind.VOUCHER, ProductKind.OTHER)
+    val hasNominal = draft.kind in listOf(ProductKind.ELECTRICITY, ProductKind.PULSA)
     val required = l(language, "Required.", "Wajib diisi.")
-    val numeric = l(language, "Use whole digits from 0 to ${Long.MAX_VALUE}.",
-        "Gunakan angka bulat dari 0 hingga ${Long.MAX_VALUE}.")
-    val valid = draft.name.isNotBlank() && managementNumber(price) != null &&
-        (cost.isEmpty() || managementNumber(cost) != null) &&
-        (if (physical) draft.unit.isNotBlank() && managementNumber(stock) != null
-        else managementNumber(nominal) != null)
+    fun textError(value: String, max: Int, requiredField: Boolean = false): String? {
+        val text = value.trim()
+        return when {
+            requiredField && text.isEmpty() && attempted -> required
+            text.length > max -> l(language, "Use at most $max characters.", "Maksimal $max karakter.")
+            text.any { it.isISOControl() } -> l(language, "Remove control characters.", "Hapus karakter kontrol.")
+            else -> null
+        }
+    }
+    fun numberError(value: String, max: Long, optional: Boolean = false): String? =
+        if ((optional && value.isEmpty()) || (value.isEmpty() && !attempted) || managementNumber(value, max) != null) null
+        else l(language, "Use whole digits from 0 to $max.", "Gunakan angka bulat dari 0 hingga $max.")
+    val nameError = textError(draft.name, 200, requiredField = true)
+    val categoryError = textError(draft.category, 100)
+    val unitError = if (physical) textError(draft.unit, 30, requiredField = true) else null
+    val providerError = if (!physical) textError(draft.provider, 100) else null
+    val packageError = if (hasPackage) textError(draft.packageName, 200) else null
+    val parsedPrice = managementNumber(price, Store.MAX_AMOUNT)
+    val parsedCost = managementNumber(cost, Store.MAX_AMOUNT)
+    val parsedStock = managementNumber(stock, Store.MAX_QUANTITY)
+    val parsedNominal = managementNumber(nominal, Store.MAX_AMOUNT)
+    val valid = draft.name.isNotBlank() && parsedPrice != null && (cost.isEmpty() || parsedCost != null) &&
+        (!physical || draft.unit.isNotBlank()) && (!physical || !draft.trackStock || parsedStock != null) &&
+        (!hasNominal || parsedNominal != null) &&
+        listOf(nameError, categoryError, unitError, providerError, packageError).all { it == null }
     AlertDialog(
         onDismissRequest = onDismiss,
+        modifier = Modifier.imePadding().testTag("product-editor"),
         shape = RoundedCornerShape(10.dp),
         containerColor = managementSurface,
         title = { Text(l(language, if (product.id == 0L) "Add product" else "Edit product",
             if (product.id == 0L) "Tambah produk" else "Ubah produk")) },
         text = {
             Column(
-                Modifier.heightIn(max = 480.dp).imePadding().verticalScroll(rememberScrollState()),
+                Modifier.fillMaxWidth().heightIn(max = (LocalConfiguration.current.screenHeightDp * 0.6f).dp).verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                ManagementField(draft.name, { draft = draft.copy(name = it) }, l(language, "Name", "Nama"),
-                    if (attempted && draft.name.isBlank()) required else null)
-                ManagementField(draft.category, { draft = draft.copy(category = it) }, l(language, "Category", "Kategori"))
-                ManagementField(price, { price = it }, l(language, "Selling price (IDR)", "Harga jual (IDR)"),
-                    if (attempted && managementNumber(price) == null) numeric else null, KeyboardType.Number)
-                ManagementField(cost, { cost = it }, l(language, "Cost (IDR, optional)", "Harga modal (IDR, opsional)"),
-                    if (attempted && cost.isNotEmpty() && managementNumber(cost) == null) numeric else null,
-                    KeyboardType.Number)
                 Text(l(language, "Product type", "Jenis produk"), style = MaterialTheme.typography.titleSmall)
                 Box {
-                    TextButton(onClick = { kindsOpen = true }, modifier = Modifier.heightIn(min = 48.dp), shape = RoundedCornerShape(8.dp)) { Text(kindLabel(draft.kind, language)) }
+                    OutlinedButton(onClick = { kindsOpen = true }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("product-kind"), shape = RoundedCornerShape(8.dp)) {
+                        Text(kindLabel(draft.kind, language), Modifier.weight(1f))
+                        PadIcon("chevron", Modifier.size(18.dp))
+                    }
                     DropdownMenu(expanded = kindsOpen, onDismissRequest = { kindsOpen = false }) {
                         ProductKind.values().forEach { kind ->
-                            DropdownMenuItem(text = { Text(kindLabel(kind, language)) }, onClick = {
-                                draft = draft.copy(kind = kind)
+                            DropdownMenuItem(text = { Text(kindLabel(kind, language)) }, modifier = Modifier.testTag("product-kind-${kind.name}"), onClick = {
+                                draft = draft.copy(kind = kind, provider = if (product.id == 0L && kind == ProductKind.ELECTRICITY && draft.provider.isBlank()) "PLN" else draft.provider)
                                 kindsOpen = false
                             })
                         }
                     }
                 }
+                ManagementField(draft.name, { draft = draft.copy(name = it) }, l(language, "Name", "Nama"), nameError,
+                    modifier = Modifier.testTag("product-name"))
+                ManagementField(price, { price = it }, l(language, "Selling price (IDR)", "Harga jual (IDR)"),
+                    numberError(price, Store.MAX_AMOUNT), KeyboardType.Number,
+                    hint = if (draft.kind == ProductKind.ELECTRICITY) l(language, "Amount charged to the buyer, e.g. 52000.", "Harga yang dibayar pembeli, contoh 52000.") else null,
+                    modifier = Modifier.testTag("product-price"))
                 if (physical) {
                     ManagementField(draft.unit, { draft = draft.copy(unit = it) }, l(language, "Unit", "Satuan"),
-                        if (attempted && draft.unit.isBlank()) required else null)
+                        unitError, modifier = Modifier.testTag("product-unit"))
                     ManagementToggle(l(language, "Track stock", "Lacak stok"), draft.trackStock) {
                         draft = draft.copy(trackStock = it)
                     }
-                    ManagementField(stock, { stock = it }, l(language, "Stock (whole units)", "Stok (jumlah bulat)"),
-                        if (attempted && managementNumber(stock) == null) numeric else null, KeyboardType.Number)
+                    if (draft.trackStock) ManagementField(stock, { stock = it }, l(language, "Stock (whole units)", "Stok (jumlah bulat)"),
+                        numberError(stock, Store.MAX_QUANTITY), KeyboardType.Number, modifier = Modifier.testTag("product-stock"))
                 } else {
                     ManagementField(draft.provider, { draft = draft.copy(provider = it) },
-                        l(language, "Operator / provider", "Operator / penyedia"))
-                    ManagementField(draft.packageName, { draft = draft.copy(packageName = it) },
-                        l(language, "Package name", "Nama paket"))
-                    ManagementField(nominal, { nominal = it }, l(language, "Service nominal (IDR)", "Nominal layanan (IDR)"),
-                        if (attempted && managementNumber(nominal) == null) numeric else null, KeyboardType.Number)
-                    ManagementToggle(l(language, "Require token / code at checkout", "Wajib token / kode saat transaksi"),
+                        l(language, "Operator / provider (optional)", "Operator / penyedia (opsional)"), providerError,
+                        modifier = Modifier.testTag("product-provider"))
+                    if (hasPackage) ManagementField(draft.packageName, { draft = draft.copy(packageName = it) },
+                        if (draft.kind == ProductKind.OTHER) l(language, "Description (optional)", "Keterangan (opsional)") else l(language, "Package name (optional)", "Nama paket (opsional)"), packageError,
+                        hint = if (draft.kind != ProductKind.OTHER) l(language, "Example: 5 GB / 30 days.", "Contoh: 5 GB / 30 hari.") else null,
+                        modifier = Modifier.testTag("product-package"))
+                    if (hasNominal) ManagementField(nominal, { nominal = it },
+                        if (draft.kind == ProductKind.ELECTRICITY) l(language, "Token face value (IDR)", "Nominal token (IDR)") else l(language, "Airtime face value (IDR)", "Nominal pulsa (IDR)"),
+                        numberError(nominal, Store.MAX_AMOUNT), KeyboardType.Number,
+                        hint = l(language, "Face value before fees, e.g. 50000.", "Nominal sebelum biaya admin, contoh 50000."),
+                        modifier = Modifier.testTag("product-nominal"))
+                    ManagementToggle(when (draft.kind) {
+                        ProductKind.ELECTRICITY -> l(language, "Require token at checkout", "Wajib token saat transaksi")
+                        ProductKind.VOUCHER -> l(language, "Require voucher code at checkout", "Wajib kode voucher saat transaksi")
+                        else -> l(language, "Require code at checkout", "Wajib kode saat transaksi")
+                    },
                         draft.requiresCode) { draft = draft.copy(requiresCode = it) }
                 }
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                Text(l(language, "Additional details", "Detail tambahan"), style = MaterialTheme.typography.titleSmall)
+                ManagementField(cost, { cost = it }, l(language, "Cost (IDR, optional)", "Harga modal (IDR, opsional)"),
+                    numberError(cost, Store.MAX_AMOUNT, optional = true), KeyboardType.Number, modifier = Modifier.testTag("product-cost"))
+                ManagementField(draft.category, { draft = draft.copy(category = it) }, l(language, "Category (optional)", "Kategori (opsional)"), categoryError,
+                    hint = l(language, "An optional label, not the product type used in checkout.", "Label tambahan, bukan jenis produk untuk pengelompokan kasir."),
+                    modifier = Modifier.testTag("product-category"))
                 ManagementToggle(l(language, "Active", "Aktif"), draft.active) { draft = draft.copy(active = it) }
             }
         },
         confirmButton = {
-            Button(modifier = Modifier.heightIn(min = 48.dp), shape = RoundedCornerShape(8.dp), onClick = {
+            Button(modifier = Modifier.heightIn(min = 48.dp).testTag("product-save"), shape = RoundedCornerShape(8.dp), onClick = {
                 attempted = true
-                val parsedPrice = managementNumber(price)
-                if (valid && parsedPrice != null) onSave(draft.copy(
-                    name = draft.name.trim(), category = draft.category.trim(), price = parsedPrice,
-                    cost = managementNumber(cost), unit = draft.unit.trim(),
-                    trackStock = physical && draft.trackStock,
-                    stock = if (physical) managementNumber(stock) ?: 0 else 0,
-                    provider = draft.provider.trim(), packageName = draft.packageName.trim(),
-                    nominal = if (physical) 0 else managementNumber(nominal) ?: 0,
-                    requiresCode = !physical && draft.requiresCode,
-                ))
+                if (valid && parsedPrice != null) {
+                    val saved = draft.copy(
+                        name = draft.name.trim(), category = draft.category.trim(), price = parsedPrice,
+                        cost = parsedCost, unit = if (physical) draft.unit.trim() else product.unit,
+                        trackStock = physical && draft.trackStock,
+                        stock = if (!physical) 0 else if (draft.trackStock) parsedStock ?: product.stock else product.stock,
+                        provider = if (!physical) draft.provider.trim() else product.provider,
+                        packageName = if (hasPackage) draft.packageName.trim() else product.packageName,
+                        nominal = if (hasNominal) parsedNominal ?: product.nominal else product.nominal,
+                        requiresCode = !physical && draft.requiresCode,
+                    )
+                    if (!physical && product.stock > 0) pendingStockReset = saved else onSave(saved)
+                }
             }) { Text(l(language, "Save", "Simpan")) }
         },
         dismissButton = { TextButton(onClick = onDismiss, modifier = Modifier.heightIn(min = 48.dp), shape = RoundedCornerShape(8.dp)) { Text(l(language, "Cancel", "Batal")) } },
     )
+    pendingStockReset?.let { saved ->
+        AlertDialog(onDismissRequest = { pendingStockReset = null },
+            title = { Text(l(language, "Remove physical stock?", "Hapus stok fisik?")) },
+            text = { Text(l(language, "Saving as a digital product removes the current stock of ${product.stock} ${product.unit} and disables stock tracking. Previous sales stay unchanged.", "Menyimpan sebagai produk digital menghapus stok saat ini sebanyak ${product.stock} ${product.unit} dan menonaktifkan pelacakan stok. Transaksi sebelumnya tidak berubah.")) },
+            confirmButton = { TextButton(onClick = { pendingStockReset = null; onSave(saved) }) { Text(l(language, "Remove stock and save", "Hapus stok dan simpan")) } },
+            dismissButton = { TextButton(onClick = { pendingStockReset = null }) { Text(l(language, "Keep editing", "Kembali mengedit")) } })
+    }
 }
 
 @Composable

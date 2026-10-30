@@ -35,6 +35,8 @@ Digital checkout previews up to three saved buyers in a bordered panel; search c
 
 PLN checkout includes a Copy button beside the meter/customer ID field. It copies the current value (including leading zeros), also after manual edits, and is disabled when empty.
 
+The product form starts with product type and shows only relevant details: stock for tracked physical goods, face value for PLN/airtime, and package details for internet/vouchers/other services. PLN defaults its provider to PLN for new products. Cost and category are optional; code requirements remain configurable for all digital types. Validation uses the same numeric limits as storage. Hidden saved metadata is retained; converting a stocked product to digital requires confirmation before removing stock.
+
 Japanese and other non-ASCII receipt lines are rendered using Android fonts and printed as monochrome ESC/POS raster images; ASCII lines keep the lightweight text path. Printer code-page/Japanese-font support is not required, but raster printing must be supported. Glyph coverage depends on Android's installed fonts; raster-heavy receipts send more data and may print slower. No fonts are downloaded.
 
 The native Compose interface follows [shadcn/ui](https://ui.shadcn.com/docs/components) visual references: zinc neutrals, thin borders, restrained corners, compact tables, segmented tabs, and clear primary actions. No React/WebView runtime or shadcn package is embedded. Light/dark colors follow the saved choice or Android system theme. Checkout separates product selection from the cart/payment step; digital buyer details belong to each line. Settings separate General, Receipt, Printer, and Data rather than one long form.
