@@ -8,6 +8,7 @@ import android.os.LocaleList
 import android.os.Build
 import android.util.Base64
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -213,9 +214,19 @@ fun SaleDialog(sale: Sale, settings: ShopSettings, busy: Boolean, onDismiss: () 
         dismissButton = { TextButton(onClick = onDismiss, enabled = !busy, modifier = Modifier.heightIn(min = 48.dp)) { Text(l(language, "Close", "Tutup")) } })
 }
 
+private fun checkoutKinds(language: String) = listOf(
+    Triple(ProductKind.PHYSICAL, "products", l(language, "Physical", "Produk Fisik")),
+    Triple(ProductKind.ELECTRICITY, "bolt", l(language, "Electricity (PLN)", "Produk PLN")),
+    Triple(ProductKind.PULSA, "phone", l(language, "Airtime (Pulsa)", "Produk Pulsa")),
+    Triple(ProductKind.VOUCHER, "voucher", l(language, "Internet Voucher", "Voucher Internet")),
+    Triple(ProductKind.DATA, "wifi", l(language, "Data Package", "Paket Internet")),
+    Triple(ProductKind.OTHER, "dots", l(language, "Other", "Lainnya")),
+)
+
 @Composable
 fun CheckoutScreen(products: List<Product>, customers: List<Customer>, cart: List<CartLine>, language: String, busy: Boolean, onCart: (List<CartLine>) -> Unit, onComplete: (Customer?, Long, String, Long) -> Unit) {
     var search by rememberSaveable { mutableStateOf("") }
+    var selectedKind by rememberSaveable { mutableStateOf<ProductKind?>(null) }
     var adding by rememberSaveable { mutableStateOf<Product?>(null) }
     var editing by rememberSaveable { mutableStateOf<Int?>(null) }
     var customer by rememberSaveable { mutableStateOf<Customer?>(null) }
@@ -233,14 +244,17 @@ fun CheckoutScreen(products: List<Product>, customers: List<Customer>, cart: Lis
     val total = if (subtotal != null && discountValue != null && discountValue in 0..subtotal) subtotal - discountValue else null
     val paidValue = if (payment == "cash") paid.toLongOrNull() else total
     val canComplete = cart.isNotEmpty() && total != null && paidValue != null && paidValue >= total && !busy
-    val matchingProducts = products.filter { it.name.contains(search, true) || it.category.contains(search, true) }
+    val kinds = checkoutKinds(language)
+    val showGrid = products.isNotEmpty() && selectedKind == null && search.isBlank()
+    val matchingProducts = products.filter { (selectedKind == null || it.kind == selectedKind) && (it.name.contains(search, true) || it.category.contains(search, true)) }
+    BackHandler(enabled = !cartTab && selectedKind != null) { selectedKind = null }
     Column(Modifier.fillMaxSize().background(SalesBackground).imePadding()) {
         Text(l(language, "Checkout", "Kasir"), Modifier.padding(horizontal = 16.dp, vertical = 16.dp), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold, color = SalesInk)
         Surface(Modifier.padding(horizontal = 16.dp), color = SalesMuted, contentColor = SalesInk, shape = RoundedCornerShape(8.dp)) {
             Row(Modifier.fillMaxWidth().padding(4.dp).selectableGroup()) {
                 listOf(false, true).forEach { isCart ->
                     val selected = cartTab == isCart
-                    Tab(selected = selected, onClick = { cartTab = isCart }, modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag(if (isCart) "checkout-cart" else "checkout-products").background(if (selected) SalesSurface else Color.Transparent, RoundedCornerShape(6.dp)), selectedContentColor = SalesInk, unselectedContentColor = SalesSecondary, text = {
+                    Tab(selected = selected, onClick = { if (!isCart && !cartTab) selectedKind = null; cartTab = isCart }, modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag(if (isCart) "checkout-cart" else "checkout-products").background(if (selected) SalesSurface else Color.Transparent, RoundedCornerShape(6.dp)), selectedContentColor = SalesInk, unselectedContentColor = SalesSecondary, text = {
                         Text(if (isCart) l(language, "Cart", "Keranjang") + " (${cart.size})" else l(language, "Products", "Produk"), style = MaterialTheme.typography.labelLarge)
                     })
                 }
@@ -249,9 +263,34 @@ fun CheckoutScreen(products: List<Product>, customers: List<Customer>, cart: Lis
         LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = if (cartTab) cartScroll else productScroll, contentPadding = PaddingValues(16.dp)) {
             if (!cartTab) {
                 item { OutlinedTextField(search, { search = it }, Modifier.fillMaxWidth().padding(bottom = 16.dp), shape = RoundedCornerShape(8.dp), leadingIcon = { PadIcon("search", tint = SalesSecondary) }, label = { Text(l(language, "Find a product", "Cari produk")) }, singleLine = true) }
+                if (selectedKind != null) item {
+                    Row(Modifier.fillMaxWidth().padding(bottom = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = { selectedKind = null }, modifier = Modifier.heightIn(min = 48.dp).testTag("checkout-all-kinds"), shape = RoundedCornerShape(8.dp), border = BorderStroke(1.dp, SalesBorder), colors = ButtonDefaults.outlinedButtonColors(containerColor = SalesSurface, contentColor = SalesInk), contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)) {
+                            PadIcon("back", Modifier.size(16.dp), SalesInk)
+                            Spacer(Modifier.width(6.dp))
+                            Text(l(language, "All categories", "Semua kategori"), style = MaterialTheme.typography.labelLarge)
+                        }
+                        Text(kinds.first { it.first == selectedKind }.third, style = MaterialTheme.typography.titleSmall, color = SalesSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                }
                 if (products.isEmpty()) item { EmptyState("products", l(language, "Your shelves are waiting", "Rak tokomu masih kosong"), l(language, "Add products in Products first.", "Tambahkan produk di menu Produk dulu.")) }
-                else if (matchingProducts.isEmpty()) item { EmptyState("search", l(language, "No products found", "Produk tidak ditemukan"), l(language, "Try a different name or category.", "Coba nama atau kategori lain.")) }
-                items(matchingProducts, key = { "product-${it.id}" }) { product ->
+                else if (showGrid) items(kinds.chunked(2), key = { "kinds-${it.first().first.name}" }) { pair ->
+                    Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min).padding(bottom = 12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        pair.forEach { (kind, icon, title) ->
+                            val count = products.count { it.kind == kind }
+                            Surface(Modifier.weight(1f).fillMaxHeight().clickable(enabled = !busy, role = Role.Button) { selectedKind = kind }.testTag("checkout-kind-${kind.name}"), shape = RoundedCornerShape(10.dp), color = SalesSurface, border = BorderStroke(1.dp, SalesBorder)) {
+                                Column(Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 16.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterVertically)) {
+                                    Box(Modifier.size(40.dp).background(SalesMuted, RoundedCornerShape(8.dp)), contentAlignment = Alignment.Center) {
+                                        PadIcon(icon, Modifier.size(22.dp), SalesInk)
+                                    }
+                                    Text(title, style = MaterialTheme.typography.titleSmall, color = SalesInk, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                    Text("$count " + l(language, "products", "produk"), style = MaterialTheme.typography.bodySmall, color = SalesSecondary, textAlign = TextAlign.Center)
+                                }
+                            }
+                        }
+                    }
+                } else if (matchingProducts.isEmpty()) item { EmptyState("search", l(language, "No products found", "Produk tidak ditemukan"), l(language, "Try a different name or category.", "Coba nama atau kategori lain.")) }
+                else items(matchingProducts, key = { "product-${it.id}" }) { product ->
                     Column(Modifier.fillMaxWidth().background(SalesSurface).clickable(enabled = !busy && cart.size < 200) { editing = null; adding = product }) {
                         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {

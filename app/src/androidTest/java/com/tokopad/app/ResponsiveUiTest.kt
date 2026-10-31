@@ -91,6 +91,7 @@ class ResponsiveUiTest {
                 language = "en", busy = false, onCart = {}, onComplete = { _, _, _, _ -> },
             )
         }
+        compose.onNodeWithTag("checkout-kind-ELECTRICITY").performScrollTo().assertIsDisplayed().performClick()
         compose.onNodeWithText(product.name).performScrollTo().assertIsDisplayed().performClick()
         compose.onNodeWithTag("digital-buyer-3").performScrollTo().assertIsDisplayed().performClick()
         compose.onNodeWithTag("digital-buyer-results").assertDoesNotExist()

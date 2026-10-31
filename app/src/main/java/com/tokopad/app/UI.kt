@@ -101,6 +101,11 @@ fun PadIcon(name: String, modifier: Modifier = Modifier.size(22.dp), tint: Color
                 "printer" -> { box(3f, 8f, 18f, 10f); path(7f to 8f, 7f to 3f, 17f to 3f, 17f to 8f); box(7f, 14f, 10f, 7f); line(16f, 11f, 18f, 11f) }
                 "bluetooth" -> { path(7f to 7f, 17f to 17f, 12f to 22f, 12f to 2f, 17f to 7f, 7f to 17f) }
                 "back" -> { line(4f, 12f, 20f, 12f); path(10f to 6f, 4f to 12f, 10f to 18f) }
+                "bolt" -> path(13f to 2f, 5f to 13f, 12f to 13f, 10f to 22f, 19f to 11f, 12f to 11f, 13f to 2f)
+                "phone" -> { box(6f, 2.5f, 12f, 19f); line(10f, 5.5f, 14f, 5.5f); line(11f, 18.5f, 13f, 18.5f) }
+                "voucher" -> { box(3f, 6f, 18f, 12f); line(9f, 6f, 9f, 9f); line(9f, 15f, 9f, 18f); line(13f, 10f, 17f, 10f); line(13f, 14f, 17f, 14f) }
+                "wifi" -> { path(3f to 9f, 12f to 4f, 21f to 9f); path(6.5f to 13f, 12f to 9.5f, 17.5f to 13f); path(10f to 16.5f, 12f to 15f, 14f to 16.5f); drawCircle(tint, 1.3f, Offset(12f, 19.5f)) }
+                "dots" -> { drawCircle(tint, 1.5f, Offset(6f, 12f), style = Stroke(1.7f)); drawCircle(tint, 1.5f, Offset(12f, 12f), style = Stroke(1.7f)); drawCircle(tint, 1.5f, Offset(18f, 12f), style = Stroke(1.7f)) }
                 "menu" -> { line(4f, 6f, 20f, 6f); line(4f, 12f, 20f, 12f); line(4f, 18f, 20f, 18f) }
                 else -> { box(4f, 4f, 6f, 6f); box(14f, 4f, 6f, 6f); box(4f, 14f, 6f, 6f); box(14f, 14f, 6f, 6f) }
             }

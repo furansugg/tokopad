@@ -38,6 +38,7 @@ class DigitalCheckoutUiTest {
                     onComplete = { _, _, _, _ -> completions++ })
             }
         }
+        compose.onNodeWithTag("checkout-kind-${product.kind.name}").performScrollTo().performClick()
         compose.onNodeWithText(product.name).performClick()
     }
 

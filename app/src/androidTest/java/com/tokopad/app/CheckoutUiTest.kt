@@ -66,6 +66,10 @@ class CheckoutUiTest {
     }
 
     private fun addProduct(quantity: String) {
+        if (compose.onAllNodes(hasTestTag("checkout-kind-PHYSICAL")).fetchSemanticsNodes().isNotEmpty()) {
+            compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasTestTag("checkout-kind-PHYSICAL"))
+            compose.onNodeWithTag("checkout-kind-PHYSICAL").performScrollTo().performClick()
+        }
         checkoutNode(product.name).performClick()
         compose.onNodeWithText("Quantity").performTextReplacement(quantity)
         compose.onNodeWithText("Add").assertIsEnabled().performClick()
@@ -203,5 +207,28 @@ class CheckoutUiTest {
             assertEquals("cash", completedPayment)
             assertEquals(5_000L, completedPaid)
         }
+    }
+
+    @Test
+    fun categoryGrid_filtersByKind_returnsToAllCategories_andSearchesAcrossKinds() {
+        val pln = Product(id = 2, name = "Token PLN 20K", price = 22_000, kind = ProductKind.ELECTRICITY)
+        compose.setContent {
+            TokopadTheme {
+                CheckoutScreen(listOf(product, pln), emptyList(), emptyList(), "id", false, onCart = {}, onComplete = { _, _, _, _ -> })
+            }
+        }
+        ProductKind.entries.forEach { kind ->
+            compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasTestTag("checkout-kind-${kind.name}"))
+            compose.onNodeWithTag("checkout-kind-${kind.name}").performScrollTo().assertIsDisplayed()
+        }
+        compose.onNodeWithText(product.name).assertDoesNotExist()
+        compose.onNodeWithTag("checkout-kind-ELECTRICITY").performScrollTo().performClick()
+        checkoutNode(pln.name).assertIsDisplayed()
+        compose.onNodeWithText(product.name).assertDoesNotExist()
+        compose.onNodeWithTag("checkout-all-kinds").performScrollTo().performClick()
+        compose.onNodeWithTag("checkout-kind-PHYSICAL").performScrollTo().assertIsDisplayed()
+        checkoutNode("Cari produk").performTextReplacement("notebook")
+        checkoutNode(product.name).assertIsDisplayed()
+        compose.onNodeWithText(pln.name).assertDoesNotExist()
     }
 }
