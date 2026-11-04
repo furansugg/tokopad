@@ -89,6 +89,7 @@ private fun Tokopad() {
     var loaded by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var selectedSale by remember { mutableStateOf<Sale?>(null) }
+    var selectedSaleId by rememberSaveable { mutableStateOf<Long?>(null) }
     var printers by remember { mutableStateOf(emptyList<Pair<String, String>>()) }
     var discardTarget by remember { mutableStateOf<String?>(null) }
     var backupWarning by remember { mutableStateOf<String?>(null) }
@@ -108,6 +109,11 @@ private fun Tokopad() {
         )
     }
 
+    fun selectSale(sale: Sale?) {
+        selectedSaleId = sale?.id
+        selectedSale = sale
+    }
+
     suspend fun refresh() {
         val zone = java.time.ZoneId.systemDefault()
         val start = java.time.LocalDate.ofEpochDay(from).atStartOfDay(zone).toInstant().toEpochMilli()
@@ -120,6 +126,9 @@ private fun Tokopad() {
         customers = data.customers
         sales = data.sales
         dashboard = data.dashboard
+        if (selectedSale == null) selectedSaleId?.let { id ->
+            selectedSale = withContext(Dispatchers.IO) { store.sale(id) }
+        }
         loaded = true
     }
 
@@ -189,7 +198,7 @@ private fun Tokopad() {
             return
         }
         if (action != "find" && settings.printerAddress.isBlank()) {
-            selectedSale = null
+            selectSale(null)
             settingsSection = "printer"
             screen = "settings"
             error = l(lang, "Select a paired printer first. The selection is saved automatically.", "Pilih printer yang sudah dipasangkan dulu. Pilihan langsung tersimpan.")
@@ -302,18 +311,18 @@ private fun Tokopad() {
             } else Box(Modifier.weight(1f)) {
                 when (screen) {
                     "more" -> ShopMenu(lang, settings.shopName, onNavigate = { if (it == "settings") settingsSection = "general"; navigate(it) })
-                    "dashboard" -> DashboardScreen(dashboard, sales.take(5), lang, from, to, onRange = { a, b -> from = a; to = b; runTask { refresh() } }, onCheckout = { navigate("checkout") }, onSale = { selectedSale = it })
+                    "dashboard" -> DashboardScreen(dashboard, sales.take(5), lang, from, to, onRange = { a, b -> from = a; to = b; runTask { refresh() } }, onCheckout = { navigate("checkout") }, onSale = { selectSale(it) })
                     "checkout" -> CheckoutScreen(products.filter { it.active }, customers, cart, lang, busy,
                         onCart = { cart = it }, onComplete = { customer, discount, payment, paid, isCredit -> runTask {
                             val sale = withContext(Dispatchers.IO) { store.checkout(cart, customer, discount, payment, paid, checkoutId, isCredit) }
                             cart = emptyList()
                             checkoutId = java.util.UUID.randomUUID().toString()
                             screen = "history"
-                            selectedSale = sale
+                            selectSale(sale)
                             refresh()
                         } })
                     "history" -> HistoryScreen(sales, lang, from, to, query,
-                        onSearch = { query = it; runTask { refresh() } }, onRange = { a, b -> from = a; to = b; runTask { refresh() } }, onSale = { selectedSale = it })
+                        onSearch = { query = it; runTask { refresh() } }, onRange = { a, b -> from = a; to = b; runTask { refresh() } }, onSale = { selectSale(it) })
                     "products" -> ProductsScreen(products, lang) { product, saved -> runTask { withContext(Dispatchers.IO) { store.saveProduct(product) }; saved(); refresh() } }
                     "customers" -> CustomersScreen(customers, lang,
                         onSave = { customer, saved -> runTask { withContext(Dispatchers.IO) { store.saveCustomer(customer) }; saved(); refresh() } },
@@ -346,14 +355,14 @@ private fun Tokopad() {
         }
     }
 
-    selectedSale?.let { sale -> SaleDialog(sale, settings, busy, onDismiss = { selectedSale = null },
+    selectedSale?.let { sale -> SaleDialog(sale, settings, busy, onDismiss = { selectSale(null) },
         onPrint = { requestPrinterAction("print", sale) },
         onSettle = { payment, requestId -> runTask {
-            selectedSale = withContext(Dispatchers.IO) { store.settleSale(sale.id, sale.balance, payment, requestId) }
+            selectSale(withContext(Dispatchers.IO) { store.settleSale(sale.id, sale.balance, payment, requestId) })
             refresh()
         } },
         onCancel = { reason -> runTask {
-            selectedSale = withContext(Dispatchers.IO) { store.cancelSale(sale.id, reason); store.sale(sale.id) }
+            selectSale(withContext(Dispatchers.IO) { store.cancelSale(sale.id, reason); store.sale(sale.id) })
             refresh()
         } }) }
     error?.let { message -> AlertDialog(onDismissRequest = { error = null }, title = { Text(l(lang, "Couldn't finish", "Belum berhasil")) },
@@ -373,7 +382,7 @@ private fun Tokopad() {
         }) { Text(l(lang, "Save backup", "Simpan cadangan")) } }, dismissButton = { TextButton(onClick = { backupWarning = null }) { Text(l(lang, "Cancel", "Batal")) } }) }
     restoreText?.let { text -> AlertDialog(onDismissRequest = { restoreText = null }, title = { Text(l(lang, "Replace all data?", "Ganti semua data?")) },
         text = { Text(l(lang, "Current products, customers, transactions and settings will be replaced. Invalid backups are rejected before changing any data.", "Produk, pelanggan, transaksi, dan pengaturan saat ini akan diganti. Cadangan tidak valid ditolak sebelum data diubah.")) },
-        confirmButton = { TextButton(enabled = !busy, onClick = { restoreText = null; runTask { withContext(Dispatchers.IO) { store.restoreBackup(text) }; cart = emptyList(); checkoutId = java.util.UUID.randomUUID().toString(); selectedSale = null; query = ""; refresh(); snackbar.showSnackbar(l(settings.language, "Backup restored.", "Cadangan dipulihkan.")) } }) { Text(l(lang, "Replace data", "Ganti data")) } },
+        confirmButton = { TextButton(enabled = !busy, onClick = { restoreText = null; runTask { withContext(Dispatchers.IO) { store.restoreBackup(text) }; cart = emptyList(); checkoutId = java.util.UUID.randomUUID().toString(); selectSale(null); query = ""; refresh(); snackbar.showSnackbar(l(settings.language, "Backup restored.", "Cadangan dipulihkan.")) } }) { Text(l(lang, "Replace data", "Ganti data")) } },
         dismissButton = { TextButton(onClick = { restoreText = null }) { Text(l(lang, "Cancel", "Batal")) } }) }
     customerHistory?.let { history -> AlertDialog(onDismissRequest = { customerHistory = null }, title = { Text(history.customer.name) },
         text = { LazyColumn(Modifier.heightIn(max = 450.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -382,14 +391,14 @@ private fun Tokopad() {
                 Text(money(history.outstanding.sumOf { it.balance }, lang), style = MaterialTheme.typography.titleLarge)
             }
             items(history.outstanding, key = { "debt-${it.id}" }) { sale ->
-                TextButton(onClick = { customerHistory = null; selectedSale = sale }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("customer-debt-${sale.id}")) {
+                TextButton(onClick = { customerHistory = null; selectSale(sale) }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("customer-debt-${sale.id}")) {
                     Text("${sale.receiptNumber}\n" + l(lang, "Due: ", "Sisa: ") + money(sale.balance, lang) + " · " + l(lang, "Settle in full", "Lunasi"))
                 }
             }
             item { Text(l(lang, "Latest 500 transactions", "500 transaksi terbaru"), style = MaterialTheme.typography.titleSmall) }
             if (history.sales.isEmpty()) item { Text(l(lang, "No transactions yet.", "Belum ada transaksi.")) }
             items(history.sales, key = { "history-${it.id}" }) { sale ->
-                TextButton(onClick = { customerHistory = null; selectedSale = sale }) {
+                TextButton(onClick = { customerHistory = null; selectSale(sale) }) {
                     val status = when {
                         sale.cancelledAt != null -> l(lang, "Cancelled", "Dibatalkan")
                         sale.balance > 0 -> l(lang, "Owing: ", "Hutang: ") + money(sale.balance, lang)

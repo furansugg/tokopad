@@ -147,7 +147,7 @@ class ResponsiveUiTest {
         scrollToTag("checkout-paid")
         compose.onNodeWithTag("checkout-paid").performTextReplacement("10000")
         scrollToTag("checkout-balance")
-        compose.onNodeWithTag("checkout-balance").assertTextContains(money(40_000, "id"))
+        compose.onNodeWithTag("checkout-balance").assertTextContains("Sisa: ${money(40_000, "id")}")
         scrollToTag("checkout-review")
         compose.onNodeWithTag("checkout-review").assertIsEnabled().performClick()
         listOf("checkout-confirm-customer", "checkout-confirm-initial", "checkout-confirm-balance").forEach {

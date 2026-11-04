@@ -76,16 +76,16 @@ class DebtUiTest {
         checkoutTag("checkout-review").assertIsNotEnabled()
         chooseBuyer()
         checkoutTag("checkout-paid").assertIsDisplayed()
-        checkoutTag("checkout-balance").assertTextContains(money(product.price, "en"))
+        checkoutTag("checkout-balance").assertTextContains("Remaining: ${money(product.price, "en")}")
         checkoutTag("checkout-customer").performClick()
         checkoutTag("checkout-clear-customer").performClick()
         checkoutTag("checkout-review").assertIsNotEnabled()
         checkoutTag("checkout-customer").performClick()
         chooseBuyer()
         checkoutTag("checkout-review").assertIsEnabled().performClick()
-        compose.onNodeWithTag("checkout-confirm-customer").performScrollTo().assertTextContains(buyer.name)
-        compose.onNodeWithTag("checkout-confirm-initial").performScrollTo().assertTextContains(money(0, "en"))
-        compose.onNodeWithTag("checkout-confirm-balance").performScrollTo().assertTextContains(money(product.price, "en"))
+        compose.onNodeWithTag("checkout-confirm-customer").performScrollTo().assertTextContains("Customer: ${buyer.name}")
+        compose.onNodeWithTag("checkout-confirm-initial").performScrollTo().assertTextContains("Initial payment: ${money(0, "en")} · Cash")
+        compose.onNodeWithTag("checkout-confirm-balance").performScrollTo().assertTextContains("Remaining: ${money(product.price, "en")}")
         compose.runOnIdle { assertEquals(0, completions) }
         compose.runOnIdle { busy.value = true }
         compose.onNodeWithTag("checkout-complete").assertIsNotEnabled()
@@ -128,15 +128,15 @@ class DebtUiTest {
         checkoutTag("checkout-credit").performClick()
         chooseBuyer()
         checkoutTag("checkout-paid").performTextReplacement("1000")
-        checkoutTag("checkout-balance").assertTextContains(money(1_500, "en"))
+        checkoutTag("checkout-balance").assertTextContains("Remaining: ${money(1_500, "en")}")
         checkoutTag("checkout-review").assertIsEnabled()
         checkoutTag("checkout-payment-noncash").performClick().assertIsSelected()
         checkoutTag("checkout-paid").assertTextContains("1000")
-        checkoutTag("checkout-balance").assertTextContains(money(1_500, "en"))
+        checkoutTag("checkout-balance").assertTextContains("Remaining: ${money(1_500, "en")}")
         compose.onAllNodes(hasText("Change:", substring = true)).assertCountEquals(0)
         checkoutTag("checkout-review").performClick()
-        compose.onNodeWithTag("checkout-confirm-initial").performScrollTo().assertTextContains("Noncash")
-        compose.onNodeWithTag("checkout-confirm-balance").performScrollTo().assertTextContains(money(1_500, "en"))
+        compose.onNodeWithTag("checkout-confirm-initial").performScrollTo().assertTextContains("Initial payment: ${money(1_000, "en")} · Noncash")
+        compose.onNodeWithTag("checkout-confirm-balance").performScrollTo().assertTextContains("Remaining: ${money(1_500, "en")}")
         compose.onNodeWithTag("checkout-complete").performClick()
         compose.runOnIdle {
             assertEquals(1, completions)
@@ -184,10 +184,10 @@ class DebtUiTest {
         checkoutTag("checkout-review").performClick()
         restoration.emulateSavedInstanceStateRestore()
         compose.onNodeWithText("Finish this sale?").assertIsDisplayed()
-        compose.onNodeWithTag("checkout-confirm-customer").performScrollTo().assertTextContains(buyer.name)
+        compose.onNodeWithTag("checkout-confirm-customer").performScrollTo().assertTextContains("Customer: ${buyer.name}")
         val amount = initial.toLongOrNull() ?: 0L
-        compose.onNodeWithTag("checkout-confirm-initial").performScrollTo().assertTextContains(money(amount, "en"))
-        compose.onNodeWithTag("checkout-confirm-balance").performScrollTo().assertTextContains(money(product.price - amount, "en"))
+        compose.onNodeWithTag("checkout-confirm-initial").performScrollTo().assertTextContains("Initial payment: ${money(amount, "en")} · ${if (method == "cash") "Cash" else "Noncash"}")
+        compose.onNodeWithTag("checkout-confirm-balance").performScrollTo().assertTextContains("Remaining: ${money(product.price - amount, "en")}")
         compose.onNodeWithTag("checkout-complete").assertIsEnabled().performClick()
         compose.runOnIdle {
             assertEquals(1, completions)
@@ -221,7 +221,7 @@ class DebtUiTest {
                     onSettle = { method, requestId -> requests += method to requestId; busy.value = true })
             }
         }
-        compose.onNodeWithTag("sale-payment-status").assertTextContains("Partially paid")
+        compose.onNodeWithTag("sale-payment-status").assertTextContains("Payment status: Partially paid")
         compose.onNodeWithTag("sale-settle").performScrollTo().performClick()
         compose.onNodeWithTag("settlement-amount").performScrollTo().assertTextContains(money(1_500, "en"))
         compose.onAllNodes(hasSetTextAction()).assertCountEquals(0)
@@ -249,11 +249,11 @@ class DebtUiTest {
             sale.value = sale.value.copy(settlement = Settlement(1_500, "noncash", 1_730_086_400_000, requests.last().second))
             busy.value = false
         }
-        compose.onNodeWithTag("sale-payment-status").assertTextContains("Paid")
-        compose.onNodeWithTag("sale-balance").assertTextContains(money(0, "en"))
+        compose.onNodeWithTag("sale-payment-status").assertTextContains("Payment status: Paid")
+        compose.onNodeWithTag("sale-balance").assertTextContains("Remaining: ${money(0, "en")}")
         compose.onNodeWithTag("sale-settle").assertDoesNotExist()
-        compose.onNodeWithTag("sale-settlement").performScrollTo().assertTextContains("Noncash")
-        compose.onNodeWithTag("sale-settlement").assertTextContains("28 Oct 2024")
+        compose.onNodeWithTag("sale-settlement").performScrollTo().assertTextContains("Noncash", substring = true)
+        compose.onNodeWithTag("sale-settlement").assertTextContains("28 Oct 2024", substring = true)
     }
 
     @Test fun settlementUnavailable_forCancelledSettledOrOrdinarySale() {
@@ -261,10 +261,10 @@ class DebtUiTest {
         compose.setContent {
             TokopadTheme { SaleDialog(sale.value, ShopSettings(), false, {}, {}, {}, onSettle = { _, _ -> error("Unexpected settlement") }) }
         }
-        compose.onNodeWithTag("sale-payment-status").assertTextContains("Cancelled")
+        compose.onNodeWithTag("sale-payment-status").assertTextContains("Payment status: Cancelled")
         compose.onNodeWithTag("sale-settle").assertDoesNotExist()
         compose.runOnIdle { sale.value = debtSale().copy(settlement = Settlement(1_500, "cash", 1_730_086_400_000, "settled")) }
-        compose.onNodeWithTag("sale-payment-status").assertTextContains("Paid")
+        compose.onNodeWithTag("sale-payment-status").assertTextContains("Payment status: Paid")
         compose.onNodeWithTag("sale-settle").assertDoesNotExist()
         compose.runOnIdle { sale.value = debtSale().copy(isCredit = false, paid = product.price) }
         compose.onNodeWithTag("sale-settle").assertDoesNotExist()

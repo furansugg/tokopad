@@ -162,18 +162,22 @@ class CreditFlowTest {
     private fun settle(original: Sale, status: String, method: String, label: String) {
         compose.onNodeWithTag("customer-debt-${original.id}").performScrollTo().performClick()
         waitForTagText("sale-payment-status", "Payment status: $status")
-        compose.onNodeWithTag("sale-balance").performScrollTo().assertTextContains(money(original.balance, "en"))
+        compose.onNodeWithTag("sale-balance").performScrollTo().assertTextContains("Remaining: " + money(original.balance, "en"))
         compose.onNodeWithTag("sale-settle").performScrollTo().performClick()
         compose.onNodeWithTag("settlement-amount").performScrollTo().assertTextContains(money(original.balance, "en"))
         compose.onNodeWithTag("settlement-$method").performScrollTo().performClick().assertIsSelected()
         readStore { store -> assertEquals(original, store.sale(original.id)) }
+        compose.activityRule.scenario.recreate()
+        waitForTagText("settlement-amount", money(original.balance, "en"))
+        compose.onNodeWithTag("settlement-$method").performScrollTo().assertIsSelected()
+        readStore { store -> assertEquals(original, store.sale(original.id)) }
         screenshot("credit-settlement-confirmation-$method")
         compose.onNodeWithTag("settlement-confirm").performClick()
         waitForTagText("sale-payment-status", "Payment status: Paid")
-        compose.onNodeWithTag("sale-balance").performScrollTo().assertTextContains(money(0, "en"))
+        compose.onNodeWithTag("sale-balance").performScrollTo().assertTextContains("Remaining: " + money(0, "en"))
         compose.onNodeWithTag("sale-settle").assertDoesNotExist()
         compose.onNodeWithTag("sale-settlement").performScrollTo()
-            .assertTextContains(money(original.balance, "en")).assertTextContains(label)
+            .assertTextContains(money(original.balance, "en"), substring = true).assertTextContains(label, substring = true)
         screenshot("credit-receipt-settled-$method")
         readStore { store ->
             val settled = store.sale(original.id)

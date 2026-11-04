@@ -81,7 +81,7 @@ class StoreTest {
                 for ((id, data) in rows) {
                     data.remove("isCredit")
                     data.remove("settlement")
-                    db.execSQL("UPDATE sales SET data = ? WHERE id = ?", arrayOf(data.toString(), id))
+                    db.execSQL("UPDATE sales SET data = ? WHERE id = ?", arrayOf<Any>(data.toString(), id))
                 }
                 db.version = version
                 db.setTransactionSuccessful()
