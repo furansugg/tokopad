@@ -23,6 +23,16 @@ The manual **Signed release** workflow additionally builds an AAB, using the `pr
 5. View sales in **History**. Reprint without duplicating sales; cancel mistakes with a reason. Cancellation adjusts records/stock, not external payments.
 6. Export backups regularly. Keep backup files private: they contain customer details, tokens, and transactions, **without encryption**. Import first requires saving a safety backup, then confirmation to replace local data.
 
+### Customer debt
+
+In the cart, enable **Pay later (debt)**, select the saved customer responsible for payment, and enter the initial payment (zero for full debt, or less than the total for a partial payment). Choose cash/noncash for that payment. Create a customer in **More → Customers** first if necessary; a digital recipient is not automatically the debtor. Completing a debt sale records the sale and reduces stock immediately.
+
+Open **More → Customers → Transactions**, select an outstanding transaction, and choose **Settle debt**. The next payment must cover the entire remaining balance: there are no further partial payments. Confirm the exact amount and cash/noncash method. Settlement records its date and method without creating another sale or changing stock. Repeated retries cannot record the same settlement twice. Receipts show initial payment, settlement when present, and balance; cancelled debts are void, with any money refunded separately.
+
+The dashboard separates sales by sale date, money received by payment date (excluding cash change), and current outstanding debt across all dates. Cancelled transactions are excluded from all three, matching the existing cancellation policy; this is not a cash/refund ledger. Customer history lists **all** outstanding debts of the responsible customer independently of the latest-500 purchase-history limit. Customers with outstanding debt cannot be deleted until those sales are settled or cancelled.
+
+Schema v3 upgrades existing paid sales without changing their snapshots. New backups use format v2, include debt/settlement data, and cannot be imported into older app versions. Old format-v1 backups remain supported.
+
 Digital sales are manual records, not automatic provider fulfillment. Noncash payment entries are not payment verification. Mixed baskets render each item according to its service type. Printer compatibility depends on actual hardware; test both paper widths before relying on them. Secure SPP connection is attempted first, then insecure SPP only if connection establishment fails before writing. A failed/uncertain write is never automatically retried: inspect the paper before retrying. BLE-only printers are explicitly unsupported. Close other printer apps and disconnect other phones if connection fails.
 
 Printed receipts use short `TP-00000001` transaction numbers, not the internal checkout UUID. PLN-only receipts use centered shop branding/title, aligned buyer/meter/kWh/product fields, `=` section rules, a bold enlarged token grouped four digits at a time, charged line amount, total/payment, and a centered footer. A change row appears only when needed; subtotal/discount appear when applicable. Mixed baskets retain per-product details. Header/logo/footer are sale snapshots: changing branding affects new sales, not historical reprints. ESC/POS raster-logo and enlarged-text support depends on the printer. Printing allows a short connection warm-up and output drain before closing; this is a compatibility measure, not proof that a particular printer physically printed.
@@ -46,7 +56,7 @@ The native Compose interface follows [shadcn/ui](https://ui.shadcn.com/docs/comp
 ## Development
 
 - Kotlin, Compose Material 3, platform SQLite, coroutines. No backend, internet permission, analytics, or always-running services.
-- SQLite transaction atomically writes a sale and stock changes; immutable JSON snapshots retain original sale details.
+- SQLite transactions atomically write sales/stock changes and full debt settlements; original sale/payment snapshots are retained alongside the optional settlement.
 - Build, lint, unit tests, and APK packaging run **only in GitHub Actions**. Workflow pins action revisions, Gradle, dependencies, Java, and Android API levels.
 - No Android Studio, SDK, emulator, or local Android build required. The workflow provisions Android tools on GitHub's runner, never this computer.
 - Gradle Wrapper omitted intentionally: pinned `gradle/actions/setup-gradle` supplies Gradle 8.11.1 in CI.

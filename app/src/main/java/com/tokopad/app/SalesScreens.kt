@@ -18,6 +18,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -48,6 +49,7 @@ import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import java.util.UUID
 
 private val SalesPrimary: Color @Composable get() = MaterialTheme.colorScheme.primary
 private val SalesInk: Color @Composable get() = MaterialTheme.colorScheme.onSurface
@@ -104,11 +106,20 @@ fun DashboardScreen(data: Dashboard, sales: List<Sale>, language: String, from: 
         item { Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(10.dp), color = SalesSurface, contentColor = SalesInk, border = BorderStroke(1.dp, SalesBorder)) {
             Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Text(l(language, "Total sales", "Total penjualan"), color = SalesSecondary, style = MaterialTheme.typography.labelLarge)
+                    Text(l(language, "Total sales · selected dates", "Total penjualan · tanggal terpilih"), Modifier.weight(1f), color = SalesSecondary, style = MaterialTheme.typography.labelLarge)
                     PadIcon("receipt", Modifier.size(18.dp), SalesSecondary)
                 }
                 Text(money(data.revenue, language), style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.SemiBold)
         } } }
+        item { Surface(Modifier.fillMaxWidth().padding(top = 12.dp), shape = RoundedCornerShape(10.dp), color = SalesSurface, contentColor = SalesInk, border = BorderStroke(1.dp, SalesBorder)) {
+            Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(l(language, "Received · selected dates", "Diterima · tanggal terpilih"), color = SalesSecondary, style = MaterialTheme.typography.labelLarge)
+                Text(money(data.received, language), Modifier.testTag("dashboard-received"), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+                HorizontalDivider(color = SalesBorder)
+                Text(l(language, "Outstanding debt · all dates", "Sisa piutang · semua tanggal"), color = SalesSecondary, style = MaterialTheme.typography.labelLarge)
+                Text(money(data.outstanding, language), Modifier.testTag("dashboard-outstanding"), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+            }
+        } }
         item { Row(Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 20.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             listOf(l(language, "Transactions", "Transaksi") to "${data.count}", l(language, "Average sale", "Rata-rata penjualan") to money(data.average, language)).forEach { (label, value) ->
                 Surface(Modifier.weight(1f), shape = RoundedCornerShape(10.dp), color = SalesSurface, contentColor = SalesInk, border = BorderStroke(1.dp, SalesBorder)) {
@@ -148,6 +159,13 @@ fun HistoryScreen(sales: List<Sale>, language: String, from: Long, to: Long, que
     }
 }
 
+private fun paymentStatus(sale: Sale, language: String): String = when {
+    sale.cancelledAt != null -> l(language, "Cancelled", "Dibatalkan")
+    sale.balance > 0 && sale.paid > 0 -> l(language, "Partially paid", "Dibayar sebagian")
+    sale.balance > 0 -> l(language, "Owing", "Belum dibayar")
+    else -> l(language, "Paid", "Lunas")
+}
+
 @Composable
 private fun SaleRow(sale: Sale, language: String, onSale: (Sale) -> Unit) {
     Column(Modifier.fillMaxWidth().background(SalesSurface).clickable { onSale(sale) }) {
@@ -160,8 +178,9 @@ private fun SaleRow(sale: Sale, language: String, onSale: (Sale) -> Unit) {
             Column(Modifier.weight(1f), horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(money(sale.total, language), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, color = SalesInk)
                 Surface(shape = RoundedCornerShape(4.dp), color = SalesSurface, contentColor = SalesInk, border = BorderStroke(1.dp, SalesBorder)) {
-                    Text(if (sale.cancelledAt != null) l(language, "Cancelled", "Dibatalkan") else l(language, "Paid", "Lunas"), Modifier.padding(horizontal = 7.dp, vertical = 3.dp), style = MaterialTheme.typography.labelSmall, color = SalesSecondary)
+                    Text(paymentStatus(sale, language), Modifier.padding(horizontal = 7.dp, vertical = 3.dp), style = MaterialTheme.typography.labelSmall, color = SalesSecondary)
                 }
+                if (sale.balance > 0) Text(l(language, "Remaining: ", "Sisa: ") + money(sale.balance, language), style = MaterialTheme.typography.bodySmall, color = SalesSecondary, textAlign = TextAlign.End)
             }
         }
         HorizontalDivider(color = SalesBorder)
@@ -169,15 +188,51 @@ private fun SaleRow(sale: Sale, language: String, onSale: (Sale) -> Unit) {
 }
 
 @Composable
-fun SaleDialog(sale: Sale, settings: ShopSettings, busy: Boolean, onDismiss: () -> Unit, onPrint: () -> Unit, onCancel: (String) -> Unit) {
+fun SaleDialog(sale: Sale, settings: ShopSettings, busy: Boolean, onDismiss: () -> Unit, onPrint: () -> Unit, onCancel: (String) -> Unit, onSettle: ((String, String) -> Unit)? = null) {
     var cancelling by remember(sale.id) { mutableStateOf(false) }
     var reason by remember { mutableStateOf("") }
+    var settling by rememberSaveable(sale.id) { mutableStateOf(false) }
+    var settlementPayment by rememberSaveable(sale.id) { mutableStateOf("cash") }
+    val settlementRequestId = rememberSaveable(sale.id) { UUID.randomUUID().toString() }
     val language = settings.language
+    val canSettle = sale.isCredit && sale.cancelledAt == null && sale.settlement == null && sale.balance > 0 && onSettle != null
+    if (settling && canSettle) {
+        AlertDialog(onDismissRequest = { if (!busy) settling = false }, containerColor = SalesSurface, shape = RoundedCornerShape(10.dp), title = { Text(l(language, "Settle this debt?", "Lunasi piutang ini?")) },
+            text = { Column(Modifier.fillMaxWidth().heightIn(max = (LocalConfiguration.current.screenHeightDp * 0.5f).dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(sale.customerName, fontWeight = FontWeight.SemiBold)
+                Text(l(language, "Full remaining balance", "Seluruh sisa piutang"), style = MaterialTheme.typography.bodyMedium)
+                Text(money(sale.balance, language), Modifier.testTag("settlement-amount"), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+                Text(l(language, "One final payment only. The amount cannot be changed.", "Hanya satu pembayaran akhir. Jumlah tidak dapat diubah."), style = MaterialTheme.typography.bodySmall, color = SalesSecondary)
+                Column(Modifier.selectableGroup()) {
+                    listOf("cash", "noncash").forEach { method ->
+                        Row(Modifier.fillMaxWidth().selectable(selected = settlementPayment == method, enabled = !busy, role = Role.RadioButton) { settlementPayment = method }.heightIn(min = 48.dp).testTag("settlement-$method").padding(end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            RadioButton(selected = settlementPayment == method, onClick = null, enabled = !busy)
+                            Spacer(Modifier.width(8.dp))
+                            Text(if (method == "cash") l(language, "Cash", "Tunai") else l(language, "Noncash", "Nontunai"))
+                        }
+                    }
+                }
+            } },
+            confirmButton = { TextButton(enabled = !busy, modifier = Modifier.heightIn(min = 48.dp).testTag("settlement-confirm"), onClick = { onSettle?.invoke(settlementPayment, settlementRequestId) }) { Text(l(language, "Confirm settlement", "Konfirmasi pelunasan")) } },
+            dismissButton = { TextButton(enabled = !busy, modifier = Modifier.heightIn(min = 48.dp), onClick = { settling = false }) { Text(l(language, "Back", "Kembali")) } })
+        return
+    }
     AlertDialog(onDismissRequest = { if (!busy) onDismiss() }, modifier = Modifier.imePadding(), containerColor = SalesSurface, shape = RoundedCornerShape(10.dp), title = { Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(l(language, "Receipt", "Nota"), color = SalesInk)
         Text(sale.receiptNumber, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
     } },
         text = { Column(Modifier.heightIn(max = 500.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            if (sale.isCredit) {
+                Text(l(language, "Payment status: ", "Status pembayaran: ") + paymentStatus(sale, language), Modifier.testTag("sale-payment-status"), fontWeight = FontWeight.SemiBold)
+                Text(sale.customerName)
+                Text(l(language, "Initial payment: ", "Pembayaran awal: ") + money(sale.paid, language))
+                Text(l(language, "Remaining: ", "Sisa: ") + money(sale.balance, language), Modifier.testTag("sale-balance"))
+                sale.settlement?.let { settlement ->
+                    val date = DateTimeFormatter.ofPattern("d MMM yyyy · HH:mm", Locale.forLanguageTag(language)).withZone(ZoneId.of(sale.zoneId)).format(Instant.ofEpochMilli(settlement.createdAt))
+                    Text(l(language, "Final settlement: ", "Pelunasan akhir: ") + money(settlement.amount, language) + "\n" + date + " · " + (if (settlement.payment == "cash") l(language, "Cash", "Tunai") else l(language, "Noncash", "Nontunai")), Modifier.testTag("sale-settlement"))
+                }
+                if (canSettle && !cancelling) Button(onClick = { settling = true }, enabled = !busy, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("sale-settle")) { Text(l(language, "Settle debt", "Lunasi piutang")) }
+            }
             // Physical receipt paper deliberately stays white in either theme.
             Surface(shape = RoundedCornerShape(8.dp), color = Color.White, contentColor = Color.Black, border = BorderStroke(1.dp, SalesBorder)) {
                 BoxWithConstraints(Modifier.fillMaxWidth().padding(12.dp)) {
@@ -204,7 +259,9 @@ fun SaleDialog(sale: Sale, settings: ShopSettings, busy: Boolean, onDismiss: () 
             if (sale.cancelledAt == null) {
                 if (!cancelling) TextButton(onClick = { cancelling = true }, enabled = !busy, modifier = Modifier.heightIn(min = 48.dp)) { Text(l(language, "Cancel transaction", "Batalkan transaksi")) }
                 else {
-                    Text(l(language, "Stock will be returned. Refund payment separately.", "Stok dikembalikan. Pengembalian pembayaran dilakukan terpisah."))
+                    Text(l(language, "Stock will be returned.", "Stok akan dikembalikan."))
+                    if (sale.balance > 0) Text(l(language, "Outstanding debt will be voided: ", "Sisa piutang akan dihapus: ") + money(sale.balance, language))
+                    if (sale.received > 0) Text(l(language, "Refund received payment separately: ", "Kembalikan pembayaran diterima secara terpisah: ") + money(sale.received, language))
                     OutlinedTextField(reason, { reason = it.take(500) }, Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), label = { Text(l(language, "Cancellation reason", "Alasan pembatalan")) })
                     TextButton(onClick = { onCancel(reason.trim()) }, enabled = !busy && reason.isNotBlank(), modifier = Modifier.heightIn(min = 48.dp)) { Text(l(language, "Confirm cancellation", "Konfirmasi pembatalan")) }
                 }
@@ -224,7 +281,7 @@ private fun checkoutKinds(language: String) = listOf(
 )
 
 @Composable
-fun CheckoutScreen(products: List<Product>, customers: List<Customer>, cart: List<CartLine>, language: String, busy: Boolean, onCart: (List<CartLine>) -> Unit, onComplete: (Customer?, Long, String, Long) -> Unit) {
+fun CheckoutScreen(products: List<Product>, customers: List<Customer>, cart: List<CartLine>, language: String, busy: Boolean, onCart: (List<CartLine>) -> Unit, onComplete: (Customer?, Long, String, Long, Boolean) -> Unit) {
     var search by rememberSaveable { mutableStateOf("") }
     var selectedKind by rememberSaveable { mutableStateOf<ProductKind?>(null) }
     var adding by rememberSaveable { mutableStateOf<Product?>(null) }
@@ -234,7 +291,8 @@ fun CheckoutScreen(products: List<Product>, customers: List<Customer>, cart: Lis
     var discount by rememberSaveable { mutableStateOf("") }
     var payment by rememberSaveable { mutableStateOf("cash") }
     var paid by rememberSaveable { mutableStateOf("") }
-    var confirm by remember { mutableStateOf(false) }
+    var isCredit by rememberSaveable { mutableStateOf(false) }
+    var confirm by rememberSaveable { mutableStateOf(false) }
     var cartTab by rememberSaveable { mutableStateOf(false) }
     var showCustomer by rememberSaveable { mutableStateOf(false) }
     val productScroll = rememberLazyListState()
@@ -242,8 +300,10 @@ fun CheckoutScreen(products: List<Product>, customers: List<Customer>, cart: Lis
     val subtotal = runCatching { cart.fold(0L) { sum, line -> Math.addExact(sum, Math.multiplyExact(line.product.price, line.quantity)) } }.getOrNull()
     val discountValue = if (discount.isBlank()) 0L else discount.toLongOrNull()
     val total = if (subtotal != null && discountValue != null && discountValue in 0..subtotal) subtotal - discountValue else null
-    val paidValue = if (payment == "cash") paid.toLongOrNull() else total
-    val canComplete = cart.isNotEmpty() && total != null && paidValue != null && paidValue >= total && !busy
+    val selectedCustomer = customers.firstOrNull { it.id == customer?.id }
+    val paidValue = if (isCredit) (if (paid.isBlank()) 0L else paid.toLongOrNull()) else if (payment == "cash") paid.toLongOrNull() else total
+    val validPayment = total != null && paidValue != null && (if (isCredit) total > 0 && paidValue >= 0 && paidValue < total && selectedCustomer != null else paidValue >= total)
+    val canComplete = cart.isNotEmpty() && validPayment && !busy
     val kinds = checkoutKinds(language)
     val showGrid = products.isNotEmpty() && selectedKind == null && search.isBlank()
     val matchingProducts = products.filter { (selectedKind == null || it.kind == selectedKind) && (it.name.contains(search, true) || it.category.contains(search, true)) }
@@ -342,18 +402,26 @@ fun CheckoutScreen(products: List<Product>, customers: List<Customer>, cart: Lis
                         HorizontalDivider(color = SalesBorder)
                     }
                 }
-                item { OutlinedButton(onClick = { showCustomer = !showCustomer }, modifier = Modifier.fillMaxWidth().padding(top = 16.dp).heightIn(min = 48.dp).testTag("checkout-customer"), shape = RoundedCornerShape(8.dp), border = BorderStroke(1.dp, SalesBorder), colors = ButtonDefaults.outlinedButtonColors(containerColor = SalesSurface, contentColor = SalesInk)) {
+                item { Row(Modifier.fillMaxWidth().padding(top = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(checked = isCredit, onCheckedChange = { isCredit = it; if (it) showCustomer = true }, enabled = !busy, modifier = Modifier.testTag("checkout-credit").semantics { contentDescription = l(language, "Pay later (debt)", "Bayar nanti (piutang)") })
+                    Text(l(language, "Pay later (debt)", "Bayar nanti (piutang)"), Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, color = SalesInk)
+                } }
+                item { OutlinedButton(onClick = { showCustomer = !showCustomer }, enabled = !busy, modifier = Modifier.fillMaxWidth().padding(top = 8.dp).heightIn(min = 48.dp).testTag("checkout-customer"), shape = RoundedCornerShape(8.dp), border = BorderStroke(1.dp, SalesBorder), colors = ButtonDefaults.outlinedButtonColors(containerColor = SalesSurface, contentColor = SalesInk)) {
                     PadIcon("customers", Modifier.size(18.dp), SalesSecondary)
                     Spacer(Modifier.width(8.dp))
-                    Text(customer?.name ?: l(language, "Add customer (optional)", "Tambah pelanggan (opsional)"), Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(selectedCustomer?.name ?: if (isCredit) l(language, "Select customer (required)", "Pilih pelanggan (wajib)") else l(language, "Add customer (optional)", "Tambah pelanggan (opsional)"), Modifier.weight(1f), maxLines = 2, overflow = TextOverflow.Ellipsis)
                     Text(if (showCustomer) "−" else "+")
                 } }
+                if (isCredit && selectedCustomer == null) item { Text(l(language, "Select a saved customer for this debt. Add new customers in Customers first.", "Pilih pelanggan tersimpan untuk piutang ini. Tambahkan pelanggan baru di menu Pelanggan."), Modifier.padding(top = 8.dp).testTag("checkout-customer-required"), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
                 if (showCustomer) {
-                    item { OutlinedTextField(customerSearch, { customerSearch = it }, Modifier.fillMaxWidth().padding(top = 8.dp), shape = RoundedCornerShape(8.dp), leadingIcon = { PadIcon("search", tint = SalesSecondary) }, label = { Text(l(language, "Find customer (optional)", "Cari pelanggan (opsional)")) }, singleLine = true) }
-                    if (customerSearch.isNotBlank()) items(customers.filter { it.name.contains(customerSearch, true) || it.phone.contains(customerSearch) }.take(5), key = { "customer-${it.id}" }) { value ->
-                        TextButton(onClick = { customer = value; customerSearch = ""; showCustomer = false }, modifier = Modifier.heightIn(min = 48.dp), colors = ButtonDefaults.textButtonColors(contentColor = SalesInk)) { Text("${value.name} · ${value.phone}") }
+                    item { OutlinedTextField(customerSearch, { customerSearch = it }, Modifier.fillMaxWidth().padding(top = 8.dp).testTag("checkout-customer-search"), enabled = !busy, shape = RoundedCornerShape(8.dp), leadingIcon = { PadIcon("search", tint = SalesSecondary) }, label = { Text(if (isCredit) l(language, "Find saved customer (required)", "Cari pelanggan tersimpan (wajib)") else l(language, "Find customer (optional)", "Cari pelanggan (opsional)")) }, singleLine = true) }
+                    val matches = customers.filter { it.name.contains(customerSearch.trim(), true) || it.phone.contains(customerSearch.trim(), true) || it.meterNumber.contains(customerSearch.trim(), true) }
+                    items(matches.take(3), key = { "customer-${it.id}" }) { value ->
+                        TextButton(onClick = { customer = value; customerSearch = ""; showCustomer = false }, enabled = !busy, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("checkout-customer-${value.id}"), colors = ButtonDefaults.textButtonColors(contentColor = SalesInk)) { Text("${value.name} · ${value.phone.ifBlank { value.meterNumber }}", Modifier.fillMaxWidth()) }
                     }
-                    item { TextButton(onClick = { customer = null; showCustomer = false }, modifier = Modifier.heightIn(min = 48.dp), colors = ButtonDefaults.textButtonColors(contentColor = SalesSecondary)) { Text(l(language, "Walk-in customer", "Pelanggan umum")) } }
+                    if (matches.size > 3) item { Text(l(language, "Showing 3 customers. Search by name, phone or meter number.", "Menampilkan 3 pelanggan. Cari nama, telepon, atau nomor meter."), Modifier.padding(top = 8.dp), color = SalesSecondary, style = MaterialTheme.typography.bodySmall) }
+                    if (matches.isEmpty()) item { Text(if (customers.isEmpty()) l(language, "No saved customers. Add one in Customers first.", "Belum ada pelanggan tersimpan. Tambahkan di menu Pelanggan.") else l(language, "No matching customers. Try another search.", "Pelanggan tidak ditemukan. Coba pencarian lain."), Modifier.padding(top = 8.dp), color = SalesSecondary, style = MaterialTheme.typography.bodySmall) }
+                    item { TextButton(onClick = { customer = null; showCustomer = false }, enabled = !busy, modifier = Modifier.heightIn(min = 48.dp).testTag("checkout-clear-customer"), colors = ButtonDefaults.textButtonColors(contentColor = SalesSecondary)) { Text(if (isCredit) l(language, "Clear customer", "Hapus pilihan pelanggan") else l(language, "Walk-in customer", "Pelanggan umum")) } }
                 }
                 item {
                     Surface(Modifier.fillMaxWidth().padding(top = 16.dp), shape = RoundedCornerShape(10.dp), color = SalesSurface, contentColor = SalesInk, border = BorderStroke(1.dp, SalesBorder)) {
@@ -369,16 +437,17 @@ fun CheckoutScreen(products: List<Product>, customers: List<Customer>, cart: Lis
                             Surface(color = SalesMuted, contentColor = SalesInk, shape = RoundedCornerShape(8.dp)) {
                                 Row(Modifier.fillMaxWidth().padding(4.dp).selectableGroup()) {
                                     listOf("cash", "noncash").forEach { method ->
-                                        Tab(selected = payment == method, onClick = { payment = method }, modifier = Modifier.weight(1f).heightIn(min = 48.dp).background(if (payment == method) SalesSurface else Color.Transparent, RoundedCornerShape(6.dp)), selectedContentColor = SalesInk, unselectedContentColor = SalesSecondary, text = { Text(if (method == "cash") l(language, "Cash", "Tunai") else l(language, "Noncash", "Nontunai"), style = MaterialTheme.typography.labelLarge) })
+                                        Tab(selected = payment == method, onClick = { payment = method }, enabled = !busy, modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag("checkout-payment-$method").background(if (payment == method) SalesSurface else Color.Transparent, RoundedCornerShape(6.dp)), selectedContentColor = SalesInk, unselectedContentColor = SalesSecondary, text = { Text(if (method == "cash") l(language, "Cash", "Tunai") else l(language, "Noncash", "Nontunai"), style = MaterialTheme.typography.labelLarge) })
                                     }
                                 }
                             }
-                            if (payment == "cash") OutlinedTextField(paid, { paid = it.filter(Char::isDigit).take(15) }, Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), label = { Text(l(language, "Cash received (Rp)", "Uang diterima (Rp)")) }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true)
-                            if (total != null && paidValue != null && paidValue >= total) Text(l(language, "Change: ", "Kembalian: ") + money(paidValue - total, language), color = SalesSecondary, style = MaterialTheme.typography.bodyMedium)
+                            if (payment == "cash" || isCredit) OutlinedTextField(paid, { paid = it.filter(Char::isDigit).take(15) }, Modifier.fillMaxWidth().testTag("checkout-paid"), enabled = !busy, shape = RoundedCornerShape(8.dp), label = { Text(if (isCredit) l(language, "Initial payment (Rp)", "Pembayaran awal (Rp)") else l(language, "Cash received (Rp)", "Uang diterima (Rp)")) }, supportingText = { if (isCredit) Text(l(language, "Leave blank for zero. Must be less than the total.", "Kosongkan untuk nol. Harus kurang dari total.")) }, isError = isCredit && (paidValue == null || total == null || total <= 0 || paidValue >= total), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true)
+                            if (isCredit) Text(l(language, "Remaining: ", "Sisa: ") + (if (total != null && paidValue != null && paidValue in 0..total) money(total - paidValue, language) else "—"), Modifier.testTag("checkout-balance"), color = SalesSecondary, style = MaterialTheme.typography.bodyMedium)
+                            else if (total != null && paidValue != null && paidValue >= total) Text(l(language, "Change: ", "Kembalian: ") + money(paidValue - total, language), color = SalesSecondary, style = MaterialTheme.typography.bodyMedium)
                         }
                     }
                 }
-                item { Button(onClick = { confirm = true }, enabled = canComplete, modifier = Modifier.fillMaxWidth().padding(top = 16.dp).heightIn(min = 48.dp), shape = RoundedCornerShape(8.dp), colors = ButtonDefaults.buttonColors(containerColor = SalesPrimary, contentColor = SalesOnPrimary)) {
+                item { Button(onClick = { confirm = true }, enabled = canComplete, modifier = Modifier.fillMaxWidth().padding(top = 16.dp).heightIn(min = 48.dp).testTag("checkout-review"), shape = RoundedCornerShape(8.dp), colors = ButtonDefaults.buttonColors(containerColor = SalesPrimary, contentColor = SalesOnPrimary)) {
                     Text(l(language, "Review sale", "Periksa penjualan"), Modifier.weight(1f), style = MaterialTheme.typography.labelLarge)
                     Spacer(Modifier.width(12.dp))
                     PadIcon("arrow", tint = if (canComplete) SalesOnPrimary else SalesSecondary)
@@ -407,10 +476,18 @@ fun CheckoutScreen(products: List<Product>, customers: List<Customer>, cart: Lis
         adding = null
         editing = null
     }) }
-    if (confirm) AlertDialog(onDismissRequest = { confirm = false }, containerColor = SalesSurface, shape = RoundedCornerShape(10.dp), title = { Text(l(language, "Finish this sale?", "Selesaikan penjualan?")) },
-        text = { Text("${cart.size} " + l(language, "items", "item") + "\n" + money(total ?: 0, language) + "\n" + l(language, "The sale is saved before printing.", "Penjualan disimpan sebelum mencetak.")) },
-        confirmButton = { TextButton(enabled = canComplete, onClick = { confirm = false; onComplete(customer, discountValue ?: 0, payment, paidValue ?: 0) }) { Text(l(language, "Complete sale", "Selesaikan")) } },
-        dismissButton = { TextButton(onClick = { confirm = false }) { Text(l(language, "Back", "Kembali")) } })
+    if (confirm) AlertDialog(onDismissRequest = { if (!busy) confirm = false }, containerColor = SalesSurface, shape = RoundedCornerShape(10.dp), title = { Text(l(language, "Finish this sale?", "Selesaikan penjualan?")) },
+        text = { Column(Modifier.fillMaxWidth().heightIn(max = (LocalConfiguration.current.screenHeightDp * 0.5f).dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("${cart.size} " + l(language, "items", "item") + "\n" + money(total ?: 0, language))
+            if (isCredit) {
+                Text(l(language, "Customer: ", "Pelanggan: ") + selectedCustomer?.name.orEmpty(), Modifier.testTag("checkout-confirm-customer"))
+                Text(l(language, "Initial payment: ", "Pembayaran awal: ") + money(paidValue ?: 0, language) + " · " + (if (payment == "cash") l(language, "Cash", "Tunai") else l(language, "Noncash", "Nontunai")), Modifier.testTag("checkout-confirm-initial"))
+                Text(l(language, "Remaining: ", "Sisa: ") + (if (total != null && paidValue != null && paidValue in 0..total) money(total - paidValue, language) else "—"), Modifier.testTag("checkout-confirm-balance"), fontWeight = FontWeight.SemiBold)
+            }
+            Text(l(language, "The sale is saved before printing.", "Penjualan disimpan sebelum mencetak."))
+        } },
+        confirmButton = { TextButton(enabled = canComplete, modifier = Modifier.heightIn(min = 48.dp).testTag("checkout-complete"), onClick = { confirm = false; onComplete(selectedCustomer, discountValue ?: 0, payment, paidValue ?: 0, isCredit) }) { Text(l(language, "Complete sale", "Selesaikan")) } },
+        dismissButton = { TextButton(enabled = !busy, modifier = Modifier.heightIn(min = 48.dp), onClick = { confirm = false }) { Text(l(language, "Back", "Kembali")) } })
 }
 
 @Composable

@@ -15,12 +15,16 @@ import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.assertTextContains
+import androidx.compose.ui.test.hasScrollToIndexAction
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.isDialog
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
@@ -88,7 +92,7 @@ class ResponsiveUiTest {
         showNarrowScreen {
             CheckoutScreen(
                 products = listOf(product), customers = (1L..6L).map { Customer(id = it, name = "Long buyer name $it", meterNumber = "12345678901") }, cart = emptyList(),
-                language = "en", busy = false, onCart = {}, onComplete = { _, _, _, _ -> },
+                language = "en", busy = false, onCart = {}, onComplete = { _, _, _, _, _ -> },
             )
         }
         compose.onNodeWithTag("checkout-kind-ELECTRICITY").performScrollTo().assertIsDisplayed().performClick()
@@ -113,6 +117,61 @@ class ResponsiveUiTest {
         assertEquals(dialog.center.x, progress.center.x, 1f)
         assertEquals(dialog.center.x, label.center.x, 1f)
         assertEquals(progress.top - dialog.top, dialog.bottom - label.bottom, 1f)
+    }
+
+    @Test fun debtCheckout_largeFontsIndonesian_customerInitialBalanceAndConfirmReachable() {
+        val product = Product(id = 1, name = "Buku catatan", price = 50_000)
+        val customer = Customer(id = 1, name = "Pelanggan dengan nama yang sangat panjang", phone = "081234567890")
+        var completions = 0
+        showNarrowScreen {
+            CheckoutScreen(listOf(product), listOf(customer), listOf(CartLine(product)), "id", false, {},
+                onComplete = { selected, _, method, paid, credit ->
+                    assertEquals(customer, selected)
+                    assertEquals("noncash", method)
+                    assertEquals(10_000L, paid)
+                    assertTrue(credit)
+                    completions++
+                })
+        }
+        fun scrollToTag(tag: String) {
+            compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasTestTag(tag))
+            compose.onNodeWithTag(tag).performScrollTo().assertIsDisplayed()
+        }
+        compose.onNodeWithTag("checkout-cart").performClick()
+        scrollToTag("checkout-credit")
+        compose.onNodeWithTag("checkout-credit").performClick()
+        scrollToTag("checkout-customer-1")
+        compose.onNodeWithTag("checkout-customer-1").performClick()
+        scrollToTag("checkout-payment-noncash")
+        compose.onNodeWithTag("checkout-payment-noncash").performClick()
+        scrollToTag("checkout-paid")
+        compose.onNodeWithTag("checkout-paid").performTextReplacement("10000")
+        scrollToTag("checkout-balance")
+        compose.onNodeWithTag("checkout-balance").assertTextContains(money(40_000, "id"))
+        scrollToTag("checkout-review")
+        compose.onNodeWithTag("checkout-review").assertIsEnabled().performClick()
+        listOf("checkout-confirm-customer", "checkout-confirm-initial", "checkout-confirm-balance").forEach {
+            compose.onNodeWithTag(it).performScrollTo().assertIsDisplayed()
+        }
+        compose.onNodeWithTag("checkout-complete").assertIsDisplayed().assertIsEnabled().performClick()
+        compose.runOnIdle { assertEquals(1, completions) }
+    }
+
+    @Test fun debtSettlement_largeFontsIndonesian_fixedBalanceMethodAndConfirmReachable() {
+        val product = Product(id = 1, name = "Buku", price = 50_000)
+        val sale = Sale(id = 1, number = "0001", createdAt = 1_730_000_000_000, zoneId = "Asia/Jakarta",
+            lines = listOf(CartLine(product)), customerId = 1, customerName = "Pelanggan dengan nama yang sangat panjang",
+            customerPhone = "081234567890", subtotal = 50_000, discount = 0, total = 50_000,
+            payment = "cash", paid = 10_000, shop = ShopSettings(language = "id"), isCredit = true)
+        var settled = false
+        showNarrowScreen {
+            SaleDialog(sale, sale.shop, false, {}, {}, {}, onSettle = { method, _ -> assertEquals("noncash", method); settled = true })
+        }
+        compose.onNodeWithTag("sale-settle").performScrollTo().assertIsDisplayed().performClick()
+        compose.onNodeWithTag("settlement-amount").performScrollTo().assertIsDisplayed().assertTextContains(money(40_000, "id"))
+        compose.onNodeWithTag("settlement-noncash").performScrollTo().assertIsDisplayed().performClick().assertIsSelected()
+        compose.onNodeWithTag("settlement-confirm").assertIsDisplayed().assertIsEnabled().performClick()
+        compose.runOnIdle { assertTrue(settled) }
     }
 
     @Test fun productEditor_largeFonts_keyboardKeepsSaveAndFieldsReachable() {

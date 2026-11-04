@@ -59,6 +59,43 @@ class StoreTest {
         return envelope.put("payload", payload).put("sha256", digest).toString()
     }
 
+    private fun legacyDatabase(version: Int) {
+        store.close()
+        context.openOrCreateDatabase("tokopad.db", Context.MODE_PRIVATE, null).use { db ->
+            db.execSQL("PRAGMA foreign_keys = OFF")
+            db.beginTransaction()
+            try {
+                if (version == 1) db.execSQL("DROP TABLE sale_customers")
+                db.execSQL("CREATE TABLE legacy_sales (id INTEGER PRIMARY KEY AUTOINCREMENT, number TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL, total INTEGER NOT NULL CHECK(total >= 0), customer_id INTEGER REFERENCES customers(id) ON DELETE SET NULL, cancelled_at INTEGER, cancellation_reason TEXT NOT NULL DEFAULT '', data TEXT NOT NULL)")
+                db.execSQL("INSERT INTO legacy_sales SELECT id, number, created_at, total, customer_id, cancelled_at, cancellation_reason, data FROM sales")
+                db.execSQL("DROP TABLE sales")
+                db.execSQL("ALTER TABLE legacy_sales RENAME TO sales")
+                db.execSQL("CREATE INDEX sales_created_at ON sales(created_at)")
+                db.execSQL("CREATE INDEX sales_customer_id ON sales(customer_id)")
+                db.execSQL("CREATE TRIGGER sales_budget_insert AFTER INSERT ON sales BEGIN UPDATE storage_budget SET bytes = bytes + length(CAST(NEW.data AS BLOB)) + 256 WHERE id = 1; END")
+                db.execSQL("CREATE TRIGGER sales_budget_update AFTER UPDATE OF data ON sales BEGIN UPDATE storage_budget SET bytes = bytes + length(CAST(NEW.data AS BLOB)) - length(CAST(OLD.data AS BLOB)) WHERE id = 1; END")
+                db.execSQL("CREATE TRIGGER sales_budget_delete AFTER DELETE ON sales BEGIN UPDATE storage_budget SET bytes = bytes - length(CAST(OLD.data AS BLOB)) - 256 WHERE id = 1; END")
+                val rows = db.rawQuery("SELECT id, data FROM sales", null).use { c ->
+                    buildList { while (c.moveToNext()) add(c.getLong(0) to JSONObject(c.getString(1))) }
+                }
+                for ((id, data) in rows) {
+                    data.remove("isCredit")
+                    data.remove("settlement")
+                    db.execSQL("UPDATE sales SET data = ? WHERE id = ?", arrayOf(data.toString(), id))
+                }
+                db.version = version
+                db.setTransactionSuccessful()
+            } finally { db.endTransaction() }
+            db.rawQuery("PRAGMA table_info(sales)", null).use { c ->
+                val columns = buildList { while (c.moveToNext()) add(c.getString(1)) }
+                assertFalse(columns.any { it in listOf("initial_received", "outstanding", "settled_at", "settlement_amount", "settlement_request") })
+            }
+            db.rawQuery("PRAGMA index_list(sales)", null).use { c ->
+                while (c.moveToNext()) assertNotEquals("sales_settlement_request", c.getString(1))
+            }
+        }
+    }
+
     private fun logo(): String {
         val bitmap = Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
         return try {
@@ -206,11 +243,7 @@ class StoreTest {
         val payer = explicit.customerId!!
         store.deleteCustomer(deleted)
         val before = store.exportBackup()
-        store.close()
-        context.openOrCreateDatabase("tokopad.db", Context.MODE_PRIVATE, null).use { db ->
-            db.execSQL("DROP TABLE sale_customers")
-            db.version = 1
-        }
+        legacyDatabase(1)
         store = Store(context)
         val expected = listOf(explicit, implicit.copy(customerId = null))
             .sortedWith(compareByDescending<Sale> { it.createdAt }.thenByDescending { it.id })
@@ -222,10 +255,58 @@ class StoreTest {
         store = Store(context)
         assertEquals(expected, store.salesForCustomer(remaining))
         context.openOrCreateDatabase("tokopad.db", Context.MODE_PRIVATE, null).use { db ->
-            assertEquals(2, db.version)
+            assertEquals(3, db.version)
             db.rawQuery("SELECT COUNT(*) FROM sale_customers", null).use { c -> c.moveToFirst(); assertEquals(3L, c.getLong(0)) }
             db.rawQuery("PRAGMA foreign_key_check", null).use { assertFalse(it.moveToFirst()) }
         }
+    }
+
+    @Test fun versionTwoMigrationBackfillsReceivedWithoutCreatingDebtOrLosingLinks() {
+        val product = product()
+        val buyer = Customer(name = "Alice").let { it.copy(id = store.saveCustomer(it)) }
+        val paid = store.checkout(listOf(CartLine(product)), buyer, 0, "cash", 150)
+        val cancelled = store.checkout(listOf(CartLine(product)), buyer, 0, "noncash", 100)
+        store.cancelSale(cancelled.id, "Correction")
+        val before = store.exportBackup()
+        legacyDatabase(2)
+        store = Store(context)
+        assertEquals(before, store.exportBackup())
+        assertEquals(paid, store.sale(paid.id))
+        assertEquals(paid, store.checkout(listOf(CartLine(product)), buyer, 0, "cash", 150, paid.number))
+        assertFalse(store.sale(paid.id).isCredit)
+        assertNull(store.sale(paid.id).settlement)
+        assertEquals(0L, store.sale(paid.id).balance)
+        assertEquals(100L, store.sale(paid.id).received)
+        assertTrue(store.outstandingForCustomer(buyer.id).isEmpty())
+        assertEquals(2, store.salesForCustomer(buyer.id).size)
+        assertEquals(Dashboard(100, 1, 100, 0), store.dashboard(0, Long.MAX_VALUE))
+        context.openOrCreateDatabase("tokopad.db", Context.MODE_PRIVATE, null).use { db ->
+            assertEquals(3, db.version)
+            db.rawQuery("SELECT initial_received, outstanding, settled_at, settlement_amount, settlement_request FROM sales ORDER BY id", null).use { c ->
+                repeat(2) {
+                    assertTrue(c.moveToNext())
+                    assertEquals(100L, c.getLong(0))
+                    assertEquals(0L, c.getLong(1))
+                    assertTrue(c.isNull(2))
+                    assertEquals(0L, c.getLong(3))
+                    assertTrue(c.isNull(4))
+                }
+            }
+            db.rawQuery("PRAGMA foreign_key_check", null).use { assertFalse(it.moveToFirst()) }
+            db.rawQuery("SELECT bytes FROM storage_budget WHERE id = 1", null).use { c ->
+                c.moveToFirst()
+                val budget = c.getLong(0)
+                val expected = listOf("products", "customers", "sales", "settings").sumOf { table ->
+                    db.rawQuery("SELECT COALESCE(SUM(length(CAST(data AS BLOB)) + 256), 0) FROM $table", null).use { rows -> rows.moveToFirst(); rows.getLong(0) }
+                }
+                assertEquals(expected, budget)
+            }
+        }
+        store.close()
+        store = Store(context)
+        assertEquals(before, store.exportBackup())
+        store.deleteCustomer(buyer.id)
+        assertNull(store.sale(paid.id).customerId)
     }
 
     @Test fun themeLogoAndBuyerFieldsRoundTripWithHistoricalShopSnapshot() {
@@ -252,11 +333,13 @@ class StoreTest {
             oldSettings(data.getJSONObject("settings"))
             val oldSale = data.getJSONArray("sales").getJSONObject(0)
             oldSale.remove("checkoutSignature")
+            oldSale.remove("isCredit")
+            oldSale.remove("settlement")
             oldSettings(oldSale.getJSONObject("shop"))
             val line = oldSale.getJSONArray("lines").getJSONObject(0)
             listOf("buyerName", "kwh", "customerId").forEach { line.remove(it) }
         }
-        store.restoreBackup(legacy)
+        store.restoreBackup(JSONObject(legacy).put("version", 1).toString())
         assertEquals("", store.customers().single().meterNumber)
         assertEquals(ShopSettings(), store.settings())
         val line = store.sale(sale.id).lines.single()
@@ -264,6 +347,8 @@ class StoreTest {
         assertEquals("", line.kwh)
         assertNull(line.customerId)
         val restored = store.sale(sale.id)
+        assertFalse(restored.isCredit)
+        assertNull(restored.settlement)
         assertEquals(restored, store.checkout(listOf(line), store.customers().single(), 0, "cash", 100, sale.number))
         assertEquals(1, store.sales().size)
     }
@@ -340,7 +425,7 @@ class StoreTest {
         val sale = store.checkout(listOf(CartLine(product, 2)), null, 0, "noncash", 200)
         assertEquals(3L, store.products().single().stock)
         assertEquals(200L, sale.total)
-        assertEquals(Dashboard(200, 1), store.dashboard(0, Long.MAX_VALUE))
+        assertEquals(Dashboard(200, 1, 200), store.dashboard(0, Long.MAX_VALUE))
     }
 
     @Test fun retryingCheckoutRequestDoesNotDuplicateSaleOrStock() {
@@ -404,7 +489,7 @@ class StoreTest {
         assertTrue(store.sales(0, sale.createdAt).isEmpty())
         assertEquals(Dashboard(), store.dashboard(0, sale.createdAt))
         assertEquals(listOf(sale), store.sales(sale.createdAt, sale.createdAt + 1))
-        assertEquals(Dashboard(100, 1), store.dashboard(sale.createdAt, sale.createdAt + 1))
+        assertEquals(Dashboard(100, 1, 100), store.dashboard(sale.createdAt, sale.createdAt + 1))
         assertTrue(store.sales(sale.createdAt, sale.createdAt).isEmpty())
         assertEquals(Dashboard(), store.dashboard(sale.createdAt, sale.createdAt))
     }

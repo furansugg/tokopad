@@ -37,6 +37,7 @@ class CheckoutUiTest {
     private var completedDiscount: Long? = null
     private var completedPayment: String? = null
     private var completedPaid: Long? = null
+    private var completedCredit: Boolean? = null
 
     private fun showCheckout() {
         compose.setContent {
@@ -48,12 +49,13 @@ class CheckoutUiTest {
                     language = "en",
                     busy = false,
                     onCart = { cart.value = it },
-                    onComplete = { selectedCustomer, discount, payment, paid ->
+                    onComplete = { selectedCustomer, discount, payment, paid, isCredit ->
                         completions++
                         completedCustomer = selectedCustomer
                         completedDiscount = discount
                         completedPayment = payment
                         completedPaid = paid
+                        completedCredit = isCredit
                     },
                 )
             }
@@ -119,6 +121,7 @@ class CheckoutUiTest {
             assertEquals(500L, completedDiscount)
             assertEquals("cash", completedPayment)
             assertEquals(5_000L, completedPaid)
+            assertEquals(false, completedCredit)
             assertEquals(listOf(CartLine(product, quantity = 2)), cart.value)
         }
         compose.onNodeWithText("Finish this sale?").assertDoesNotExist()
@@ -143,6 +146,7 @@ class CheckoutUiTest {
             assertEquals(0L, completedDiscount)
             assertEquals("noncash", completedPayment)
             assertEquals(product.price, completedPaid)
+            assertEquals(false, completedCredit)
             assertEquals(listOf(CartLine(product)), cart.value)
         }
     }
@@ -189,8 +193,9 @@ class CheckoutUiTest {
             TokopadTheme {
                 CheckoutScreen(listOf(product), emptyList(), savedCart.value, "en", false,
                     onCart = { savedCart.value = it },
-                    onComplete = { _, discount, payment, paid ->
+                    onComplete = { _, discount, payment, paid, isCredit ->
                         completedDiscount = discount; completedPayment = payment; completedPaid = paid
+                        completedCredit = isCredit
                     })
             }
         }
@@ -206,6 +211,7 @@ class CheckoutUiTest {
             assertEquals(500L, completedDiscount)
             assertEquals("cash", completedPayment)
             assertEquals(5_000L, completedPaid)
+            assertEquals(false, completedCredit)
         }
     }
 
@@ -214,7 +220,7 @@ class CheckoutUiTest {
         val pln = Product(id = 2, name = "Token PLN 20K", price = 22_000, kind = ProductKind.ELECTRICITY)
         compose.setContent {
             TokopadTheme {
-                CheckoutScreen(listOf(product, pln), emptyList(), emptyList(), "id", false, onCart = {}, onComplete = { _, _, _, _ -> })
+                CheckoutScreen(listOf(product, pln), emptyList(), emptyList(), "id", false, onCart = {}, onComplete = { _, _, _, _, _ -> })
             }
         }
         ProductKind.entries.forEach { kind ->

@@ -58,6 +58,34 @@ class ReceiptLayoutTest {
         assertTrue(image.second <= 2048)
     }
 
+    @Test fun creditResponsibleCustomerUsesUnicodeRasterEvenWhenCustomerIsHidden() {
+        for (kind in listOf(ProductKind.PHYSICAL, ProductKind.ELECTRICITY)) {
+            val original = sale("").copy(
+                lines = listOf(CartLine(Product(name = "Product", price = 23_000, kind = kind), buyerName = "Siti")),
+                customerId = 3, customerName = "山田太郎", customerPhone = "08123",
+                subtotal = 23_000, total = 23_000, isCredit = true, paid = 5_000,
+            )
+            val settled = original.copy(settlement = Settlement(18_000, "noncash", 86_400_000, "request"))
+            for (transaction in listOf(original.copy(paid = 0), original, settled, settled.copy(cancelledAt = 172_800_000))) {
+                for (language in listOf("en", "id")) for ((paper, stride) in listOf(58 to 48, 80 to 72)) {
+                    val settings = ShopSettings(language = language, paperWidth = paper, showCustomer = false)
+                    val blocks = Receipt.blocks(transaction, settings)
+                    val columns = if (paper == 80) 48 else 32
+                    assertTrue(blocks.all { it.text.codePointCount(0, it.text.length) <= if (it.large) columns / 2 else columns })
+                    val frames = rasterFrames(Receipt.bytes(transaction, settings))
+                    assertEquals(blocks.count { it.text.any { character -> character.code > 126 } }, frames.size)
+                    assertTrue(frames.isNotEmpty())
+                    assertTrue(frames.all { it.first == stride && it.second in 1..2048 && it.third.any { pixel -> pixel != 0.toByte() } })
+                    val text = Receipt.text(transaction, settings).replace(Regex("\\s+"), " ")
+                    assertTrue(text.contains(if (language == "id") "Penanggung jawab: 山田太郎" else "Responsible customer: 山田太郎"))
+                    assertFalse(text.contains("Rp -"))
+                    assertFalse(text.contains("Change"))
+                    assertFalse(text.contains("Kembali"))
+                }
+            }
+        }
+    }
+
     private fun sale(logo: String) = Sale(
         id = 1, number = "internal-id", createdAt = 0, zoneId = "UTC",
         lines = emptyList(), customerId = null, customerName = "", customerPhone = "",

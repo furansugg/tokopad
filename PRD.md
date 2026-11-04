@@ -37,17 +37,19 @@ Antarmuka minimalis, nyaman, informatif, dan memakai bahasa sehari-hari. Operasi
 - Filter rentang tanggal dan daftar transaksi terbaru.
 - Akses cepat ke kasir.
 - Omzet adalah total setelah diskon dari transaksi selesai, tidak termasuk transaksi dibatalkan; bukan laba atau kas masuk bersih.
+- Pisahkan uang diterima berdasarkan tanggal pembayaran (tanpa kembalian) dan sisa piutang saat ini dari semua tanggal. Transaksi batal dikecualikan; bukan buku kas/pengembalian dana.
 - Kondisi kosong memberi petunjuk tindakan singkat, tanpa grafik dekoratif.
 
 ### 4.2. Kasir
 
 - Cari produk aktif, pilih item, ubah jumlah, dan hapus item dari keranjang.
 - Gabungkan produk fisik dan digital dalam satu transaksi.
-- Pilih pelanggan secara opsional; transaksi tanpa pelanggan tetap diperbolehkan.
+- Pilih pelanggan secara opsional untuk pembayaran penuh; transaksi hutang wajib memilih pelanggan tersimpan yang bertanggung jawab atas pembayaran.
 - Tampilkan kolom digital hanya ketika jenis produk memerlukannya.
 - Sediakan diskon nominal per transaksi.
 - Pilih pembayaran tunai atau nontunai dan tampilkan total serta kembalian.
-- Pembayaran tunai harus mencukupi total; pembayaran nontunai dicatat sebesar total.
+- Pembayaran penuh: tunai harus mencukupi total; nontunai dicatat sebesar total.
+- Pilihan hutang/bayar sebagian menerima nol atau nominal kurang dari total positif. Pembayaran berikutnya wajib langsung melunasi seluruh sisa, tanpa cicilan lanjutan; simpan tanggal dan metode pelunasan tanpa penjualan/perubahan stok baru.
 - Tampilkan ringkasan sebelum transaksi diselesaikan.
 - Simpan transaksi dan perubahan stok secara atomik.
 - Cegah transaksi ganda akibat penekanan tombol berulang.
@@ -99,6 +101,7 @@ Antarmuka minimalis, nyaman, informatif, dan memakai bahasa sehari-hari. Operasi
 - Nama wajib; nomor telepon dan catatan opsional.
 - Tampilkan transaksi terkait pelanggan.
 - Penghapusan pelanggan melepaskan hubungan profil tanpa menghapus transaksi.
+- Pelanggan dengan sisa hutang tidak dapat dihapus sebelum hutang dilunasi atau transaksinya dibatalkan. Detail pelanggan menampilkan semua hutangnya, terpisah dari batas 500 transaksi terbaru dan bukan hutang penerima digital lain.
 - Snapshot pelanggan pada transaksi lama tetap tersimpan; penghapusan profil bukan penghapusan seluruh data historis.
 
 ## 5. Nota
@@ -136,6 +139,7 @@ Antarmuka minimalis, nyaman, informatif, dan memakai bahasa sehari-hari. Operasi
 - Tema aplikasi menyediakan Light, Dark, dan System; nota tetap memakai kertas putih dan tinta hitam.
 - Cetak ulang menggunakan snapshot tersebut; pengaturan presentasi saat ini seperti bahasa dan lebar kertas boleh berubah.
 - Nota pembatalan/cetak ulang transaksi batal menampilkan status batal dengan jelas.
+- Nota hutang menampilkan penanggung jawab, pembayaran awal, total dibayar, sisa hutang, dan rincian pelunasan bila ada; tidak menampilkan kembalian negatif. Pembatalan menghapus sisa piutang; pengembalian uang tetap manual.
 
 ## 6. Bahasa dan pengalaman pengguna
 
@@ -168,6 +172,7 @@ Antarmuka minimalis, nyaman, informatif, dan memakai bahasa sehari-hari. Operasi
 - Ekspor dan impor cadangan melalui pemilih file sistem Android.
 - Cadangan mencakup data toko, produk, pelanggan, transaksi, serta pengaturan yang portabel; koneksi printer dikonfigurasi kembali bila perlu.
 - Format cadangan memiliki versi dan validasi integritas serta relasi data.
+- Format v2 menyimpan hutang/pelunasan dan menolak pemulihan pada aplikasi lama; aplikasi baru tetap menerima format v1. Migrasi database v1/v2 ke v3 mempertahankan transaksi lama sebagai lunas.
 - Pemulihan MVP mengganti dataset, bukan menggabungkan dua database.
 - Implementasi MVP membatasi cadangan 64 MiB UTF-8. Anggaran data tersimpan 28 MiB ditegakkan dalam transaksi database agar data tetap dapat diekspor; penulisan yang melampaui batas ditolak tanpa perubahan parsial.
 - Jelaskan konsekuensi, minta konfirmasi, dan sediakan cadangan data saat ini sebelum penggantian.
@@ -216,7 +221,7 @@ Catat model perangkat, versi Android, dataset, dan hasil pengukuran. Target tida
 - Integrasi distributor pulsa/token atau verifikasi pembayaran otomatis.
 - Sinkronisasi cloud, banyak perangkat, banyak cabang.
 - Akun staf, autentikasi, serta hak akses berbasis peran.
-- Akuntansi lengkap, utang/piutang, retur sebagian, dan pembayaran terpisah.
+- Akuntansi lengkap, hutang ke pemasok, cicilan lebih dari pembayaran awal dan satu pelunasan, retur sebagian, dan pembayaran campuran dalam satu tahap.
 - Produk berbobot atau jumlah pecahan, barcode scanner khusus, dan impor katalog massal.
 - Printer USB, jaringan, dan Bluetooth BLE.
 - Editor nota drag-and-drop, dukungan logo/gambar, dan analitik lanjutan.
@@ -238,6 +243,7 @@ Catat model perangkat, versi Android, dataset, dan hasil pengukuran. Target tida
 13. Cadangan valid dapat dipulihkan; file rusak atau versi tidak didukung ditolak tanpa kehilangan data.
 14. Target performa diukur dan hasilnya dicatat pada perangkat referensi.
 15. GitHub Actions menghasilkan APK tanpa build Android atau pemasangan toolchain Android di komputer ini.
+16. Hutang penuh/bayar sebagian wajib memiliki penanggung jawab; hanya satu pelunasan seluruh sisa diperbolehkan. Percobaan ulang, restart, cadangan, dan pembatalan tidak menggandakan pembayaran atau stok.
 
 ## 12. Urutan implementasi
 

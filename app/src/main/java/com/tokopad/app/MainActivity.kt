@@ -20,6 +20,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.selection.selectable
@@ -92,7 +94,7 @@ private fun Tokopad() {
     var backupWarning by remember { mutableStateOf<String?>(null) }
     var safetyBackup by remember { mutableStateOf<String?>(null) }
     var restoreText by remember { mutableStateOf<String?>(null) }
-    var customerHistory by remember { mutableStateOf<Pair<Customer, List<Sale>>?>(null) }
+    var customerHistory by remember { mutableStateOf<CustomerHistory?>(null) }
     var settingsSection by rememberSaveable { mutableStateOf("general") }
     var printerStatus by remember { mutableStateOf("") }
     var pendingPrinterAction by remember { mutableStateOf<String?>(null) }
@@ -302,8 +304,8 @@ private fun Tokopad() {
                     "more" -> ShopMenu(lang, settings.shopName, onNavigate = { if (it == "settings") settingsSection = "general"; navigate(it) })
                     "dashboard" -> DashboardScreen(dashboard, sales.take(5), lang, from, to, onRange = { a, b -> from = a; to = b; runTask { refresh() } }, onCheckout = { navigate("checkout") }, onSale = { selectedSale = it })
                     "checkout" -> CheckoutScreen(products.filter { it.active }, customers, cart, lang, busy,
-                        onCart = { cart = it }, onComplete = { customer, discount, payment, paid -> runTask {
-                            val sale = withContext(Dispatchers.IO) { store.checkout(cart, customer, discount, payment, paid, checkoutId) }
+                        onCart = { cart = it }, onComplete = { customer, discount, payment, paid, isCredit -> runTask {
+                            val sale = withContext(Dispatchers.IO) { store.checkout(cart, customer, discount, payment, paid, checkoutId, isCredit) }
                             cart = emptyList()
                             checkoutId = java.util.UUID.randomUUID().toString()
                             screen = "history"
@@ -316,7 +318,11 @@ private fun Tokopad() {
                     "customers" -> CustomersScreen(customers, lang,
                         onSave = { customer, saved -> runTask { withContext(Dispatchers.IO) { store.saveCustomer(customer) }; saved(); refresh() } },
                         onDelete = { customer -> runTask { withContext(Dispatchers.IO) { store.deleteCustomer(customer.id) }; refresh() } },
-                        onHistory = { customer -> runTask { customerHistory = customer to withContext(Dispatchers.IO) { store.salesForCustomer(customer.id) } } })
+                        onHistory = { customer -> runTask {
+                            customerHistory = withContext(Dispatchers.IO) {
+                                CustomerHistory(customer, store.salesForCustomer(customer.id), store.outstandingForCustomer(customer.id))
+                            }
+                        } })
                     "settings" -> SettingsScreen(settings, printers,
                         onSave = { value -> runTask { withContext(Dispatchers.IO) { store.saveSettings(value) }; refresh(); snackbar.showSnackbar(l(value.language, "Settings saved.", "Pengaturan tersimpan.")) } },
                         onFindPrinters = { requestPrinterAction("find") },
@@ -342,6 +348,10 @@ private fun Tokopad() {
 
     selectedSale?.let { sale -> SaleDialog(sale, settings, busy, onDismiss = { selectedSale = null },
         onPrint = { requestPrinterAction("print", sale) },
+        onSettle = { payment, requestId -> runTask {
+            selectedSale = withContext(Dispatchers.IO) { store.settleSale(sale.id, sale.balance, payment, requestId) }
+            refresh()
+        } },
         onCancel = { reason -> runTask {
             selectedSale = withContext(Dispatchers.IO) { store.cancelSale(sale.id, reason); store.sale(sale.id) }
             refresh()
@@ -365,11 +375,29 @@ private fun Tokopad() {
         text = { Text(l(lang, "Current products, customers, transactions and settings will be replaced. Invalid backups are rejected before changing any data.", "Produk, pelanggan, transaksi, dan pengaturan saat ini akan diganti. Cadangan tidak valid ditolak sebelum data diubah.")) },
         confirmButton = { TextButton(enabled = !busy, onClick = { restoreText = null; runTask { withContext(Dispatchers.IO) { store.restoreBackup(text) }; cart = emptyList(); checkoutId = java.util.UUID.randomUUID().toString(); selectedSale = null; query = ""; refresh(); snackbar.showSnackbar(l(settings.language, "Backup restored.", "Cadangan dipulihkan.")) } }) { Text(l(lang, "Replace data", "Ganti data")) } },
         dismissButton = { TextButton(onClick = { restoreText = null }) { Text(l(lang, "Cancel", "Batal")) } }) }
-    customerHistory?.let { (customer, history) -> AlertDialog(onDismissRequest = { customerHistory = null }, title = { Text(customer.name) },
-        text = { Column(Modifier.heightIn(max = 450.dp).verticalScroll(rememberScrollState())) {
-            Text(l(lang, "Latest 500 transactions", "500 transaksi terbaru"))
-            if (history.isEmpty()) Text(l(lang, "No transactions yet.", "Belum ada transaksi."))
-            history.forEach { sale -> TextButton(onClick = { customerHistory = null; selectedSale = sale }) { Text("${sale.receiptNumber}\n${money(sale.total, lang)}" + if (sale.cancelledAt != null) " · " + l(lang, "Cancelled", "Dibatalkan") else "") } }
+    customerHistory?.let { history -> AlertDialog(onDismissRequest = { customerHistory = null }, title = { Text(history.customer.name) },
+        text = { LazyColumn(Modifier.heightIn(max = 450.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            item {
+                Text(l(lang, "Outstanding debt (all dates)", "Sisa hutang (semua tanggal)"), style = MaterialTheme.typography.titleSmall)
+                Text(money(history.outstanding.sumOf { it.balance }, lang), style = MaterialTheme.typography.titleLarge)
+            }
+            items(history.outstanding, key = { "debt-${it.id}" }) { sale ->
+                TextButton(onClick = { customerHistory = null; selectedSale = sale }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("customer-debt-${sale.id}")) {
+                    Text("${sale.receiptNumber}\n" + l(lang, "Due: ", "Sisa: ") + money(sale.balance, lang) + " · " + l(lang, "Settle in full", "Lunasi"))
+                }
+            }
+            item { Text(l(lang, "Latest 500 transactions", "500 transaksi terbaru"), style = MaterialTheme.typography.titleSmall) }
+            if (history.sales.isEmpty()) item { Text(l(lang, "No transactions yet.", "Belum ada transaksi.")) }
+            items(history.sales, key = { "history-${it.id}" }) { sale ->
+                TextButton(onClick = { customerHistory = null; selectedSale = sale }) {
+                    val status = when {
+                        sale.cancelledAt != null -> l(lang, "Cancelled", "Dibatalkan")
+                        sale.balance > 0 -> l(lang, "Owing: ", "Hutang: ") + money(sale.balance, lang)
+                        else -> l(lang, "Paid", "Lunas")
+                    }
+                    Text("${sale.receiptNumber}\n${money(sale.total, lang)} · $status")
+                }
+            }
         } }, confirmButton = { TextButton(onClick = { customerHistory = null }) { Text(l(lang, "Close", "Tutup")) } }) }
     if (busy) BusyDialog(lang)
     }
@@ -413,6 +441,7 @@ private fun ShopMenu(language: String, shopName: String, onNavigate: (String) ->
 }
 
 private data class AppData(val settings: ShopSettings, val products: List<Product>, val customers: List<Customer>, val sales: List<Sale>, val dashboard: Dashboard)
+private data class CustomerHistory(val customer: Customer, val sales: List<Sale>, val outstanding: List<Sale>)
 
 internal fun operationError(error: Exception, language: String): String {
     val message = error.message.orEmpty()
@@ -424,6 +453,14 @@ internal fun operationError(error: Exception, language: String): String {
         message.contains("inactive", true) -> "Produk sudah nonaktif. Hapus dari keranjang."
         message.contains("no longer exists") -> "Produk atau pelanggan sudah tidak tersedia. Muat ulang data."
         message.contains("already cancelled") -> "Transaksi ini sudah dibatalkan. Stok tidak dikembalikan lagi."
+        message.contains("Customer has outstanding debt") -> "Pelanggan masih memiliki hutang. Lunasi atau batalkan transaksi hutangnya sebelum menghapus pelanggan."
+        message.contains("Debt requires") -> "Pilih pelanggan tersimpan yang bertanggung jawab atas hutang ini."
+        message.contains("Debt initial payment") -> "Pembayaran awal harus kurang dari total. Untuk hutang penuh, isi nol. Untuk pembayaran penuh, matikan pilihan hutang."
+        message.contains("already settled") -> "Hutang ini sudah lunas. Pembayaran tidak dicatat dua kali."
+        message.contains("Settlement request already") -> "Permintaan pelunasan ini sudah dipakai untuk transaksi lain. Tutup nota lalu buka kembali."
+        message.contains("entire remaining debt") -> "Pembayaran berikutnya wajib melunasi seluruh sisa hutang."
+        message.contains("Cannot settle a cancelled") -> "Transaksi sudah dibatalkan dan tidak dapat dilunasi."
+        message.contains("no outstanding debt") -> "Transaksi ini tidak memiliki sisa hutang."
         message.contains("Checkout request already") -> "Permintaan kasir ini sudah dipakai. Keluar dari kasir, buang keranjang, lalu mulai penjualan baru."
         message.contains("Local data limit") -> "Batas data lokal tercapai. Ekspor cadangan sebelum memulai dataset toko yang baru. Data lama tetap aman."
         message.contains("Bluetooth permission") -> "Izin Bluetooth diperlukan. Cari printer di Pengaturan untuk memberi izin."

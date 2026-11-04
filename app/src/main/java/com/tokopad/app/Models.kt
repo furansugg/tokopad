@@ -49,6 +49,8 @@ data class ShopSettings(
     val logo: String = "",
 ) : java.io.Serializable
 
+data class Settlement(val amount: Long, val payment: String, val createdAt: Long, val requestId: String)
+
 data class Sale(
     val id: Long,
     val number: String,
@@ -66,10 +68,14 @@ data class Sale(
     val shop: ShopSettings,
     val cancelledAt: Long? = null,
     val cancellationReason: String = "",
+    val isCredit: Boolean = false,
+    val settlement: Settlement? = null,
 ) {
     val receiptNumber: String get() = "TP-${id.toString().padStart(8, '0')}"
+    val balance: Long get() = if (!isCredit || settlement != null || cancelledAt != null) 0 else total - paid
+    val received: Long get() = minOf(paid, total) + (settlement?.amount ?: 0)
 }
 
-data class Dashboard(val revenue: Long = 0, val count: Long = 0) {
+data class Dashboard(val revenue: Long = 0, val count: Long = 0, val received: Long = 0, val outstanding: Long = 0) {
     val average: Long get() = if (count == 0L) 0 else revenue / count
 }

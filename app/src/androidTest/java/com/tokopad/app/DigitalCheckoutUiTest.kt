@@ -35,7 +35,7 @@ class DigitalCheckoutUiTest {
             TokopadTheme {
                 CheckoutScreen(listOf(product), customers, cart.value, "en", false,
                     onCart = { cart.value = it },
-                    onComplete = { _, _, _, _ -> completions++ })
+                    onComplete = { _, _, _, _, _ -> completions++ })
             }
         }
         compose.onNodeWithTag("checkout-kind-${product.kind.name}").performScrollTo().performClick()
@@ -143,7 +143,7 @@ class DigitalCheckoutUiTest {
         compose.setContent {
             TokopadTheme {
                 CheckoutScreen(listOf(electricity), listOf(buyer), cart.value, "en", false,
-                    onCart = { cart.value = it }, onComplete = { _, _, _, _ -> completions++ })
+                    onCart = { cart.value = it }, onComplete = { _, _, _, _, _ -> completions++ })
             }
         }
         compose.onNodeWithTag("checkout-cart").performClick()

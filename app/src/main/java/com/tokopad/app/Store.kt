@@ -16,7 +16,7 @@ import java.util.UUID
 
 /** Synchronous; call on an IO thread. Amounts are whole rupiah. */
 class Store(context: Context) : java.io.Closeable {
-    private val helper = object : SQLiteOpenHelper(context.applicationContext, "tokopad.db", null, 2) {
+    private val helper = object : SQLiteOpenHelper(context.applicationContext, "tokopad.db", null, 3) {
         override fun onConfigure(db: SQLiteDatabase) { db.setForeignKeyConstraintsEnabled(true) }
 
         override fun onCreate(db: SQLiteDatabase) {
@@ -27,6 +27,7 @@ class Store(context: Context) : java.io.Closeable {
             db.execSQL("CREATE INDEX sales_created_at ON sales(created_at)")
             db.execSQL("CREATE INDEX sales_customer_id ON sales(customer_id)")
             createSaleCustomers(db)
+            createCreditColumns(db)
             // ponytail: sum(UTF-8 data bytes + 256/row) <= 28 MiB keeps escaped backups below 64 MiB; raise only with the backup ceiling.
             db.execSQL("CREATE TABLE storage_budget (id INTEGER PRIMARY KEY CHECK(id = 1), bytes INTEGER NOT NULL CONSTRAINT storage_budget_limit CHECK(bytes BETWEEN 0 AND $MAX_STORAGE_BYTES))")
             db.execSQL("INSERT INTO storage_budget (id, bytes) VALUES (1, 0)")
@@ -38,15 +39,30 @@ class Store(context: Context) : java.io.Closeable {
         }
 
         override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-            check(oldVersion == 1 && newVersion == 2) { "Unsupported database version: $oldVersion to $newVersion" }
-            createSaleCustomers(db)
-            db.query("sales", null, null, null, null, null, "id").use { c ->
-                while (c.moveToNext()) linkSaleCustomers(db, sale(c))
+            check(oldVersion in 1..2 && newVersion == 3) { "Unsupported database version: $oldVersion to $newVersion" }
+            if (oldVersion < 2) {
+                createSaleCustomers(db)
+                db.query("sales", null, null, null, null, null, "id").use { c ->
+                    while (c.moveToNext()) linkSaleCustomers(db, sale(c))
+                }
             }
+            createCreditColumns(db)
+            db.execSQL("UPDATE sales SET initial_received = total")
         }
     }
 
     override fun close() = helper.close()
+
+    private fun createCreditColumns(db: SQLiteDatabase) {
+        db.execSQL("ALTER TABLE sales ADD COLUMN initial_received INTEGER NOT NULL DEFAULT 0 CHECK(initial_received >= 0)")
+        db.execSQL("ALTER TABLE sales ADD COLUMN outstanding INTEGER NOT NULL DEFAULT 0 CHECK(outstanding >= 0)")
+        db.execSQL("ALTER TABLE sales ADD COLUMN settled_at INTEGER")
+        db.execSQL("ALTER TABLE sales ADD COLUMN settlement_amount INTEGER NOT NULL DEFAULT 0 CHECK(settlement_amount >= 0)")
+        db.execSQL("ALTER TABLE sales ADD COLUMN settlement_request TEXT")
+        db.execSQL("CREATE INDEX sales_outstanding_customer ON sales(customer_id, outstanding)")
+        db.execSQL("CREATE INDEX sales_settled_at ON sales(settled_at)")
+        db.execSQL("CREATE UNIQUE INDEX sales_settlement_request ON sales(settlement_request)")
+    }
 
     private fun createSaleCustomers(db: SQLiteDatabase) {
         db.execSQL("CREATE TABLE sale_customers (sale_id INTEGER NOT NULL REFERENCES sales(id) ON DELETE CASCADE, customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE, PRIMARY KEY(sale_id, customer_id))")
@@ -122,7 +138,12 @@ class Store(context: Context) : java.io.Closeable {
 
     fun deleteCustomer(id: Long) {
         validId(id)
-        transaction { db -> db.delete("customers", "id = ?", arrayOf(id.toString())) }
+        transaction { db ->
+            db.query("sales", arrayOf("id"), "customer_id = ? AND outstanding > 0", arrayOf(id.toString()), null, null, null, "1").use {
+                require(!it.moveToFirst()) { "Customer has outstanding debt; settle or cancel those sales before deleting" }
+            }
+            db.delete("customers", "id = ?", arrayOf(id.toString()))
+        }
     }
 
     fun settings(): ShopSettings = readSettings(helper.readableDatabase)
@@ -132,13 +153,14 @@ class Store(context: Context) : java.io.Closeable {
         transaction { db -> writeSettings(db, settings) }
     }
 
-    fun checkout(lines: List<CartLine>, customer: Customer?, discount: Long, payment: String, paid: Long, requestId: String = UUID.randomUUID().toString()): Sale {
+    fun checkout(lines: List<CartLine>, customer: Customer?, discount: Long, payment: String, paid: Long, requestId: String = UUID.randomUUID().toString(), isCredit: Boolean = false): Sale {
         require(UUID.fromString(requestId).toString() == requestId) { "Invalid checkout request" }
         require(lines.isNotEmpty() && lines.size <= MAX_LINES) { "Cart must contain 1–$MAX_LINES lines" }
         amount(discount, "Discount")
         amount(paid, "Paid amount")
         require(payment in PAYMENTS) { "Payment must be cash or noncash" }
         customer?.let { validateCustomer(it, allowNew = true) }
+        require(!isCredit || (customer != null && customer.id > 0)) { "Debt requires a saved customer" }
         lines.forEach { validateLine(it) }
         // Assigned buyer IDs are snapshots, not part of the caller's retry identity.
         // Keep the request digest through cancellation/backup: resolved sale customers can differ from the request.
@@ -146,6 +168,8 @@ class Store(context: Context) : java.io.Closeable {
             lines.forEach { put(JSONArray(listOf(it.product.id, it.product.price, it.quantity, it.destination, it.code, it.note, it.buyerName, it.kwh))) }
             put(customer?.let { customerJson(it) } ?: JSONObject.NULL)
             put(discount); put(payment); put(paid)
+            // Preserve the digest of paid-in-full checkouts made by previous versions.
+            if (isCredit) put(true)
         }.toString())
         return transaction { db ->
             db.query("sales", null, "number = ?", arrayOf(requestId), null, null, null).use { c ->
@@ -155,7 +179,7 @@ class Store(context: Context) : java.io.Closeable {
                     fun legacySignature(items: List<CartLine>) = items.map { listOf(it.product.id.toString(), it.product.price.toString(), it.quantity.toString(), it.destination, it.code, it.note, it.buyerName, it.kwh) }
                     require(if (storedSignature.isNotEmpty()) storedSignature == signature else
                         legacySignature(existing.lines) == legacySignature(lines) && existing.discount == discount &&
-                        existing.payment == payment && existing.paid == paid &&
+                        existing.payment == payment && existing.paid == paid && existing.isCredit == isCredit &&
                         existing.customerName == customer?.name.orEmpty() && existing.customerPhone == customer?.phone.orEmpty()) {
                         "Checkout request already used for a different sale; discard the cart and start again"
                     }
@@ -187,7 +211,8 @@ class Store(context: Context) : java.io.Closeable {
             }
             require(discount <= subtotal) { "Discount exceeds subtotal" }
             val total = subtotal - discount
-            require(if (payment == "cash") paid >= total else paid == total) { "Cash must cover total; noncash must equal total" }
+            if (isCredit) require(total > 0 && paid < total) { "Debt initial payment must be less than a positive total" }
+            else require(if (payment == "cash") paid >= total else paid == total) { "Cash must cover total; noncash must equal total" }
             val currentCustomer = customer?.takeIf { it.id > 0 }?.let {
                 findCustomer(db, it.id) ?: throw IllegalArgumentException("Customer no longer exists")
             }
@@ -230,7 +255,7 @@ class Store(context: Context) : java.io.Closeable {
                 zoneId = ZoneId.systemDefault().id, lines = savedLines,
                 customerId = customerSnapshot?.id, customerName = customerSnapshot?.name.orEmpty(),
                 customerPhone = customerSnapshot?.phone.orEmpty(), subtotal = subtotal, discount = discount,
-                total = total, payment = payment, paid = paid, shop = readSettings(db),
+                total = total, payment = payment, paid = paid, shop = readSettings(db), isCredit = isCredit,
             )
             val id = db.insertOrThrow("sales", null, saleValues(sale).apply {
                 put("data", saleJson(sale).put("checkoutSignature", signature).toString())
@@ -261,6 +286,48 @@ class Store(context: Context) : java.io.Closeable {
         ).use { c -> buildList { while (c.moveToNext()) add(sale(c)) } }
     }
 
+    fun outstandingForCustomer(customerId: Long): List<Sale> {
+        validId(customerId)
+        return helper.readableDatabase.query(
+            "sales", null, "customer_id = ? AND outstanding > 0", arrayOf(customerId.toString()),
+            null, null, "created_at DESC, id DESC",
+        ).use { c -> buildList { while (c.moveToNext()) add(sale(c)) } }
+    }
+
+    fun settleSale(id: Long, amount: Long, payment: String, requestId: String): Sale {
+        validId(id)
+        Companion.amount(amount, "Settlement amount")
+        require(payment in PAYMENTS) { "Settlement payment must be cash or noncash" }
+        require(UUID.fromString(requestId).toString() == requestId) { "Invalid settlement request" }
+        return transaction { db ->
+            val sale = findSale(db, id) ?: throw IllegalArgumentException("Sale not found")
+            require(sale.cancelledAt == null) { "Cannot settle a cancelled sale" }
+            sale.settlement?.let { existing ->
+                require(existing.requestId == requestId && existing.amount == amount && existing.payment == payment) { "Debt is already settled" }
+                return@transaction sale
+            }
+            require(sale.isCredit && sale.balance > 0) { "Sale has no outstanding debt" }
+            require(amount == sale.balance) { "Settlement must pay the entire remaining debt" }
+            db.query("sales", arrayOf("id"), "settlement_request = ?", arrayOf(requestId), null, null, null).use {
+                require(!it.moveToFirst()) { "Settlement request already used for another sale" }
+            }
+            val settlement = Settlement(amount, payment, maxOf(System.currentTimeMillis(), sale.createdAt), requestId)
+            val updated = sale.copy(settlement = settlement)
+            val data = db.query("sales", arrayOf("data"), "id = ?", arrayOf(id.toString()), null, null, null).use { c ->
+                check(c.moveToFirst()); JSONObject(c.string("data"))
+            }
+            val values = ContentValues().apply {
+                put("outstanding", 0)
+                put("settled_at", settlement.createdAt)
+                put("settlement_amount", settlement.amount)
+                put("settlement_request", requestId)
+                put("data", data.put("settlement", settlementJson(settlement)).toString())
+            }
+            check(db.update("sales", values, "id = ? AND outstanding > 0 AND cancelled_at IS NULL", arrayOf(id.toString())) == 1)
+            updated
+        }
+    }
+
     fun cancelSale(id: Long, reason: String) {
         validId(id)
         text(reason, 1000, "Cancellation reason", required = true, multiline = true)
@@ -272,10 +339,11 @@ class Store(context: Context) : java.io.Closeable {
                 require(line.quantity <= MAX_QUANTITY - product.stock) { "Restored stock exceeds limit" }
                 db.execSQL("UPDATE products SET stock = stock + ? WHERE id = ?", arrayOf(line.quantity, product.id))
             }
-            val timestamp = maxOf(System.currentTimeMillis(), sale.createdAt)
+            val timestamp = maxOf(System.currentTimeMillis(), sale.createdAt, sale.settlement?.createdAt ?: 0)
             val values = ContentValues().apply {
                 put("cancelled_at", timestamp)
                 put("cancellation_reason", reason)
+                put("outstanding", 0)
                 val data = db.query("sales", arrayOf("data"), "id = ?", arrayOf(id.toString()), null, null, null).use { c ->
                     check(c.moveToFirst()); JSONObject(c.string("data"))
                 }
@@ -287,10 +355,19 @@ class Store(context: Context) : java.io.Closeable {
 
     fun dashboard(from: Long, to: Long): Dashboard {
         validRange(from, to)
-        return helper.readableDatabase.rawQuery(
-            "SELECT COALESCE(SUM(total), 0), COUNT(*) FROM sales WHERE cancelled_at IS NULL AND created_at >= ? AND created_at < ?",
-            arrayOf(from.toString(), to.toString()),
-        ).use { c -> c.moveToFirst(); Dashboard(c.getLong(0), c.getLong(1)) }
+        return transaction { db ->
+            val totals = db.rawQuery(
+                "SELECT COALESCE(SUM(total), 0), COUNT(*), COALESCE(SUM(initial_received), 0) FROM sales WHERE cancelled_at IS NULL AND created_at >= ? AND created_at < ?",
+                arrayOf(from.toString(), to.toString()),
+            ).use { c -> c.moveToFirst(); Dashboard(c.getLong(0), c.getLong(1), c.getLong(2)) }
+            val settlements = db.rawQuery(
+                "SELECT COALESCE(SUM(settlement_amount), 0) FROM sales WHERE cancelled_at IS NULL AND settled_at >= ? AND settled_at < ?",
+                arrayOf(from.toString(), to.toString()),
+            ).use { c -> c.moveToFirst(); c.getLong(0) }
+            val outstanding = db.rawQuery("SELECT COALESCE(SUM(outstanding), 0) FROM sales WHERE cancelled_at IS NULL", null)
+                .use { c -> c.moveToFirst(); c.getLong(0) }
+            totals.copy(received = totals.received + settlements, outstanding = outstanding)
+        }
     }
 
     fun exportBackup(): String = transaction { db ->
@@ -307,7 +384,7 @@ class Store(context: Context) : java.io.Closeable {
         } }
         val payload = JSONObject().put("products", products).put("customers", customers).put("sales", sales)
             .put("settings", settingsJson(readSettings(db).copy(printerAddress = ""))).toString()
-        val result = JSONObject().put("version", 1).put("sha256", digest(payload)).put("payload", payload).toString()
+        val result = JSONObject().put("version", 2).put("sha256", digest(payload)).put("payload", payload).toString()
         requireBackupSize(result)
         result
     }
@@ -362,6 +439,10 @@ class Store(context: Context) : java.io.Closeable {
     }
     private fun saleValues(s: Sale) = ContentValues().apply {
         put("number", s.number); put("created_at", s.createdAt); put("total", s.total)
+        put("initial_received", minOf(s.paid, s.total)); put("outstanding", s.balance)
+        if (s.settlement == null) putNull("settled_at") else put("settled_at", s.settlement.createdAt)
+        put("settlement_amount", s.settlement?.amount ?: 0)
+        if (s.settlement == null) putNull("settlement_request") else put("settlement_request", s.settlement.requestId)
         if (s.customerId == null) putNull("customer_id") else put("customer_id", s.customerId)
         if (s.cancelledAt == null) putNull("cancelled_at") else put("cancelled_at", s.cancelledAt)
         put("cancellation_reason", s.cancellationReason); put("data", saleJson(s).toString())
@@ -396,7 +477,7 @@ class Store(context: Context) : java.io.Closeable {
             try {
                 boundedNesting(text)
                 val envelope = JSONObject(text)
-                require(envelope.integer("version", 1, 1) == 1L) { "Unsupported backup version" }
+                val version = envelope.integer("version", 1, 2)
                 val payload = envelope.string("payload")
                 val checksum = envelope.string("sha256")
                 require(checksum.matches(Regex("[0-9a-f]{64}")) && checksum == digest(payload)) { "Backup integrity check failed" }
@@ -406,6 +487,7 @@ class Store(context: Context) : java.io.Closeable {
                 val customers = data.objects("customers", MAX_CUSTOMERS).map { parseCustomer(it).also { c -> validateCustomer(c) } }
                 val signatures = mutableMapOf<Long, String>()
                 val sales = data.objects("sales", MAX_SALES).map { json -> parseSale(json).also { s ->
+                    require(version >= 2 || (!s.isCredit && s.settlement == null)) { "Debt requires backup version 2" }
                     validateSale(s)
                     if (json.has("checkoutSignature")) {
                         val signature = json.string("checkoutSignature")
@@ -418,6 +500,8 @@ class Store(context: Context) : java.io.Closeable {
                 require(customers.map { it.id }.toSet().size == customers.size) { "Duplicate customer ID" }
                 require(sales.map { it.id }.toSet().size == sales.size) { "Duplicate sale ID" }
                 require(sales.map { it.number }.toSet().size == sales.size) { "Duplicate sale number" }
+                val settlementRequests = sales.mapNotNull { it.settlement?.requestId }
+                require(settlementRequests.toSet().size == settlementRequests.size) { "Duplicate settlement request" }
                 val productIds = products.map { it.id }.toSet()
                 val customerIds = customers.map { it.id }.toSet()
                 for (sale in sales) {
@@ -552,7 +636,19 @@ class Store(context: Context) : java.io.Closeable {
             for (line in s.lines) { validateLine(line); subtotal = addAmount(subtotal, lineTotal(line)) }
             amount(s.subtotal, "Subtotal"); amount(s.discount, "Discount"); amount(s.total, "Total"); amount(s.paid, "Paid amount")
             require(s.subtotal == subtotal && s.discount <= subtotal && s.total == subtotal - s.discount) { "Inconsistent sale totals" }
-            require(s.payment in PAYMENTS && if (s.payment == "cash") s.paid >= s.total else s.paid == s.total) { "Invalid payment" }
+            require(s.payment in PAYMENTS) { "Invalid payment" }
+            if (s.isCredit) {
+                require(s.total > 0 && s.paid < s.total) { "Invalid debt initial payment" }
+                require(s.customerName.isNotBlank() && (s.balance == 0L || s.customerId != null)) { "Missing debt customer" }
+            } else {
+                require(if (s.payment == "cash") s.paid >= s.total else s.paid == s.total) { "Invalid payment" }
+                require(s.settlement == null) { "Unexpected settlement" }
+            }
+            s.settlement?.let {
+                require(it.amount == s.total - s.paid && it.payment in PAYMENTS) { "Settlement must pay the entire remaining debt" }
+                require(it.createdAt in s.createdAt..(s.cancelledAt ?: MAX_TIME)) { "Invalid settlement time" }
+                require(UUID.fromString(it.requestId).toString() == it.requestId) { "Invalid settlement request" }
+            }
             s.customerId?.let { validId(it) }
             text(s.customerName, 200, "Customer name")
             text(s.customerPhone, 64, "Customer phone")
@@ -584,7 +680,10 @@ class Store(context: Context) : java.io.Closeable {
                 .put("customerPhone", s.customerPhone).put("subtotal", s.subtotal).put("discount", s.discount).put("total", s.total)
                 .put("payment", s.payment).put("paid", s.paid).put("shop", settingsJson(s.shop))
                 .put("cancelledAt", s.cancelledAt ?: JSONObject.NULL).put("cancellationReason", s.cancellationReason)
+                .put("isCredit", s.isCredit).put("settlement", s.settlement?.let { settlementJson(it) } ?: JSONObject.NULL)
         }
+        private fun settlementJson(s: Settlement) = JSONObject().put("amount", s.amount).put("payment", s.payment)
+            .put("createdAt", s.createdAt).put("requestId", s.requestId)
         private fun parseProduct(o: JSONObject) = Product(
             id = o.integer("id", 0, MAX_ID), name = o.string("name"), category = o.string("category"), price = o.integer("price", 0, MAX_AMOUNT),
             cost = o.nullableInteger("cost", 0, MAX_AMOUNT), kind = ProductKind.valueOf(o.string("kind")), unit = o.string("unit"),
@@ -609,6 +708,10 @@ class Store(context: Context) : java.io.Closeable {
             subtotal = o.integer("subtotal", 0, MAX_AMOUNT), discount = o.integer("discount", 0, MAX_AMOUNT), total = o.integer("total", 0, MAX_AMOUNT),
             payment = o.string("payment"), paid = o.integer("paid", 0, MAX_AMOUNT), shop = parseSettings(o.getJSONObject("shop")),
             cancelledAt = o.nullableInteger("cancelledAt", 0, MAX_TIME), cancellationReason = o.string("cancellationReason"),
+            isCredit = if (o.has("isCredit")) o.boolean("isCredit") else false,
+            settlement = if (!o.has("settlement") || o.get("settlement") === JSONObject.NULL) null else o.getJSONObject("settlement").let {
+                Settlement(it.integer("amount", 1, MAX_AMOUNT), it.string("payment"), it.integer("createdAt", 0, MAX_TIME), it.string("requestId"))
+            },
         )
 
         // JSONObject getters coerce strings/floats; backup inputs must retain their actual JSON types.

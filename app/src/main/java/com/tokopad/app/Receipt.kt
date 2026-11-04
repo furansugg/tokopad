@@ -89,6 +89,34 @@ object Receipt {
             } else line(value, emphasis = true, large = true, centered = true)
         }
         val date = DateTimeFormatter.ofPattern("dd MMM yyyy HH:mm", locale).withZone(ZoneId.of(sale.zoneId))
+        fun paymentName(payment: String) = when (payment.lowercase(Locale.ROOT)) {
+            "cash", "tunai" -> label("Cash", "Tunai")
+            "noncash", "non_cash", "non-cash", "cashless", "nontunai", "non tunai" -> label("Non-cash", "Nontunai")
+            else -> payment
+        }
+        fun responsibleCustomer() {
+            detail(label("Responsible customer", "Penanggung jawab"), sale.customerName)
+            detail(label("Phone", "Telepon"), sale.customerPhone)
+        }
+        fun creditPayment() {
+            detail(label("Initial method", "Metode awal"), paymentName(sale.payment))
+            row(label("Initial payment", "Bayar awal"), money(sale.paid))
+            sale.settlement?.let { settlement ->
+                detail(label("Settled", "Dilunasi"), date.format(Instant.ofEpochMilli(settlement.createdAt)))
+                detail(label("Settlement method", "Metode pelunasan"), paymentName(settlement.payment))
+                row(label("Settlement", "Pelunasan"), money(settlement.amount))
+            }
+            row(label("Paid total", "Total dibayar"), money(sale.received))
+            row(if (sale.cancelledAt != null) label("Outstanding (void)", "Sisa utang (batal)")
+                else label("Outstanding", "Sisa utang"), money(sale.balance), emphasis = true)
+            val status = when {
+                sale.cancelledAt != null -> label("CANCELLED", "DIBATALKAN")
+                sale.balance > 0 -> label("OWING", "BELUM LUNAS")
+                else -> label("PAID", "LUNAS")
+            }
+            line("${label("Credit status", "Status utang")}: $status", emphasis = true)
+            if (sale.cancelledAt != null) line(label("Refunds handled manually", "Pengembalian dana manual"))
+        }
         val shop = sale.shop
         require(shop.headerMode in listOf("name", "logo", "both")) { "Unsupported receipt header mode" }
         if (shop.headerMode != "name" && shop.logo.isNotBlank()) {
@@ -116,6 +144,7 @@ object Receipt {
             field(label("Date", "Tgl"), DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm", locale)
                 .withZone(ZoneId.of(sale.zoneId)).format(Instant.ofEpochMilli(sale.createdAt)))
             if (shop.cashier.isNotBlank()) field(label("Cashier", "Kasir"), shop.cashier)
+            if (sale.isCredit) responsibleCustomer()
             for (item in sale.lines) {
                 field(label("Buyer", "Plg"), item.buyerName.ifBlank { sale.customerName })
                 field("Meter", item.destination)
@@ -136,9 +165,13 @@ object Receipt {
             }
             rule('=')
             row("TOTAL", money(sale.total), emphasis = true)
-            val method = if (sale.payment == "cash") label("CASH", "TUNAI") else label("NONCASH", "NONTUNAI")
-            row(label("Paid", "Bayar") + " ($method)", numbers.format(sale.paid))
-            if (sale.paid != sale.total) row(label("Change", "Kembali"), money(Math.subtractExact(sale.paid, sale.total)))
+            if (sale.isCredit) {
+                creditPayment()
+            } else {
+                val method = if (sale.payment == "cash") label("CASH", "TUNAI") else label("NONCASH", "NONTUNAI")
+                row(label("Paid", "Bayar") + " ($method)", numbers.format(sale.paid))
+                if (sale.paid != sale.total) row(label("Change", "Kembali"), money(Math.subtractExact(sale.paid, sale.total)))
+            }
             rule('=')
             optional(shop.footer, centered = true)
             return result
@@ -152,7 +185,9 @@ object Receipt {
         }
         detail(label("Receipt", "Nota"), sale.receiptNumber)
         detail(label("Date", "Tanggal"), date.format(Instant.ofEpochMilli(sale.createdAt)))
-        if (settings.showCustomer) {
+        if (sale.isCredit) {
+            responsibleCustomer()
+        } else if (settings.showCustomer) {
             detail(label("Customer", "Pelanggan"), sale.customerName)
             detail(label("Phone", "Telepon"), sale.customerPhone)
         }
@@ -204,14 +239,13 @@ object Receipt {
         row(label("Subtotal", "Subtotal"), money(sale.subtotal))
         if (settings.showDiscount && sale.discount > 0) row(label("Discount", "Diskon"), "-${money(sale.discount)}")
         row(label("TOTAL", "TOTAL"), money(sale.total), emphasis = true)
-        val payment = when (sale.payment.lowercase(Locale.ROOT)) {
-            "cash", "tunai" -> label("Cash", "Tunai")
-            "noncash", "non_cash", "non-cash", "cashless", "nontunai", "non tunai" -> label("Non-cash", "Nontunai")
-            else -> sale.payment
+        if (sale.isCredit) {
+            creditPayment()
+        } else {
+            detail(label("Payment", "Pembayaran"), paymentName(sale.payment))
+            row(label("Paid", "Dibayar"), money(sale.paid))
+            row(label("Change", "Kembalian"), money(Math.subtractExact(sale.paid, sale.total)))
         }
-        detail(label("Payment", "Pembayaran"), payment)
-        row(label("Paid", "Dibayar"), money(sale.paid))
-        row(label("Change", "Kembalian"), money(Math.subtractExact(sale.paid, sale.total)))
         rule()
         optional(shop.footer, centered = true)
         return result

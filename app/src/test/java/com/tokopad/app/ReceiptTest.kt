@@ -124,6 +124,141 @@ class ReceiptTest {
         assertTrue(indonesian.contains("Alasan: Wrong item"))
     }
 
+    private fun creditSale(kind: ProductKind, paid: Long) = sale(listOf(CartLine(
+        Product(name = if (kind == ProductKind.ELECTRICITY) "PLN 20" else "Rice", price = 24_000, kind = kind),
+        buyerName = "Siti", destination = "000987", kwh = "13.2", code = "12345678901234567890",
+    ))).copy(isCredit = true, paid = paid)
+
+    private fun creditText(transaction: Sale, language: String, paper: Int): String {
+        val settings = ShopSettings(language = language, paperWidth = paper, showCustomer = false, showDiscount = false)
+        val blocks = Receipt.blocks(transaction, settings)
+        val columns = if (paper == 80) 48 else 32
+        assertTrue(blocks.all { it.text.codePointCount(0, it.text.length) <= if (it.large) columns / 2 else columns })
+        val text = Receipt.text(transaction, settings).replace(Regex("\\s+"), " ")
+        val id = language == "id"
+        assertTrue(text.contains(if (id) "Penanggung jawab: Original customer" else "Responsible customer: Original customer"))
+        assertTrue(text.contains(if (id) "Telepon: 08123456789" else "Phone: 08123456789"))
+        assertTrue(text.contains(if (id) "Metode awal: Tunai" else "Initial method: Cash"))
+        assertTrue(text.contains(if (id) "TOTAL Rp 23.000" else "TOTAL Rp 23,000"))
+        assertFalse(text.contains("Change"))
+        assertFalse(text.contains("Kembali"))
+        assertFalse(text.contains("Rp -"))
+        assertFalse(text.contains("-Rp"))
+        assertTrue(blocks.any { it.emphasis && it.text.startsWith(if (id) "Status utang:" else "Credit status:") })
+        if (transaction.lines.single().product.kind == ProductKind.ELECTRICITY) {
+            assertTrue(text.contains(if (id) "Plg : Siti" else "Buyer : Siti"))
+            assertEquals("12345678901234567890", blocks.filter { it.large }.joinToString("") { it.text.replace(" ", "") })
+        }
+        return text
+    }
+
+    @Test fun zeroPaymentCreditShowsResponsibleCustomerAndEntireDebt() {
+        for (kind in listOf(ProductKind.PHYSICAL, ProductKind.ELECTRICITY)) {
+            for (language in listOf("en", "id")) for (paper in listOf(58, 80)) {
+                val text = creditText(creditSale(kind, 0), language, paper)
+                val sections = if (language == "id") listOf(
+                    "Bayar awal Rp 0", "Total dibayar Rp 0", "Sisa utang Rp 23.000", "Status utang: BELUM LUNAS",
+                ) else listOf("Initial payment Rp 0", "Paid total Rp 0", "Outstanding Rp 23,000", "Credit status: OWING")
+                for (section in sections) assertTrue(section, text.contains(section))
+                assertFalse(text.contains("Settled:"))
+                assertFalse(text.contains("Dilunasi:"))
+            }
+        }
+    }
+
+    @Test fun partialCreditShowsInitialTenderAndRemainingDebt() {
+        for (kind in listOf(ProductKind.PHYSICAL, ProductKind.ELECTRICITY)) {
+            for (language in listOf("en", "id")) for (paper in listOf(58, 80)) {
+                val text = creditText(creditSale(kind, 5_000), language, paper)
+                val sections = if (language == "id") listOf(
+                    "Bayar awal Rp 5.000", "Total dibayar Rp 5.000", "Sisa utang Rp 18.000", "Status utang: BELUM LUNAS",
+                ) else listOf("Initial payment Rp 5,000", "Paid total Rp 5,000", "Outstanding Rp 18,000", "Credit status: OWING")
+                for (section in sections) assertTrue(section, text.contains(section))
+                assertFalse(text.contains("Settled:"))
+                assertFalse(text.contains("Dilunasi:"))
+            }
+        }
+    }
+
+    @Test fun settledCreditKeepsInitialTenderAndAddsDatedSettlement() {
+        for (kind in listOf(ProductKind.PHYSICAL, ProductKind.ELECTRICITY)) {
+            for (language in listOf("en", "id")) for (paper in listOf(58, 80)) {
+                val transaction = creditSale(kind, 5_000).copy(settlement = Settlement(18_000, "non_cash", 86_400_000, "private-request"))
+                val text = creditText(transaction, language, paper)
+                val sections = if (language == "id") listOf(
+                    "Bayar awal Rp 5.000", "Dilunasi: 02 Jan 1970 07:00", "Metode pelunasan: Nontunai",
+                    "Pelunasan Rp 18.000", "Total dibayar Rp 23.000", "Sisa utang Rp 0", "Status utang: LUNAS",
+                ) else listOf(
+                    "Initial payment Rp 5,000", "Settled: 02 Jan 1970 07:00", "Settlement method: Non-cash",
+                    "Settlement Rp 18,000", "Paid total Rp 23,000", "Outstanding Rp 0", "Credit status: PAID",
+                )
+                for (section in sections) assertTrue(section, text.contains(section))
+                assertFalse(text.contains("private-request"))
+                assertFalse(text.contains("BELUM LUNAS"))
+                assertFalse(text.contains("OWING"))
+                assertEquals(5_000L, transaction.paid)
+            }
+        }
+    }
+
+    @Test fun cancelledCreditVoidsDebtButKeepsPaymentHistoryForManualRefunds() {
+        for (kind in listOf(ProductKind.PHYSICAL, ProductKind.ELECTRICITY)) {
+            val original = creditSale(kind, 5_000)
+            for (transaction in listOf(original.copy(paid = 0), original,
+                original.copy(settlement = Settlement(18_000, "noncash", 86_400_000, "private-request")))) {
+                for (language in listOf("en", "id")) for (paper in listOf(58, 80)) {
+                    val text = creditText(transaction.copy(cancelledAt = 172_800_000, cancellationReason = "Wrong item"), language, paper)
+                    val id = language == "id"
+                    val sections = if (id) listOf(
+                        "*** DIBATALKAN ***", "Dibatalkan: 03 Jan 1970 07:00", "Alasan: Wrong item",
+                        "Sisa utang (batal) Rp 0", "Status utang: DIBATALKAN", "Pengembalian dana manual",
+                    ) else listOf(
+                        "*** CANCELLED ***", "Cancelled: 03 Jan 1970 07:00", "Reason: Wrong item",
+                        "Outstanding (void) Rp 0", "Credit status: CANCELLED", "Refunds handled manually",
+                    )
+                    for (section in sections) assertTrue(section, text.contains(section))
+                    val initial = if (transaction.paid == 0L) "0" else if (id) "5.000" else "5,000"
+                    val received = if (transaction.settlement != null) { if (id) "23.000" else "23,000" } else initial
+                    assertTrue(text.contains("${if (id) "Bayar awal" else "Initial payment"} Rp $initial"))
+                    assertTrue(text.contains("${if (id) "Total dibayar" else "Paid total"} Rp $received"))
+                    if (transaction.settlement != null) {
+                        assertTrue(text.contains(if (id) "Dilunasi: 02 Jan 1970 07:00" else "Settled: 02 Jan 1970 07:00"))
+                        assertTrue(text.contains(if (id) "Metode pelunasan: Nontunai" else "Settlement method: Non-cash"))
+                        assertTrue(text.contains(if (id) "Pelunasan Rp 18.000" else "Settlement Rp 18,000"))
+                    }
+                    assertFalse(text.contains("Credit status: PAID"))
+                    assertFalse(text.contains("Status utang: LUNAS"))
+                    assertFalse(text.contains("BELUM LUNAS"))
+                    assertFalse(text.contains("OWING"))
+                }
+            }
+        }
+    }
+
+    @Test fun paidInFullNonCreditKeepsExistingPaymentSections() {
+        for (kind in listOf(ProductKind.PHYSICAL, ProductKind.ELECTRICITY)) {
+            for (language in listOf("en", "id")) for (paper in listOf(58, 80)) {
+                val transaction = creditSale(kind, 23_000).copy(isCredit = false)
+                val text = Receipt.text(transaction, ShopSettings(language = language, paperWidth = paper, showCustomer = false))
+                    .replace(Regex("\\s+"), " ")
+                val id = language == "id"
+                if (kind == ProductKind.ELECTRICITY) {
+                    assertTrue(text.contains(if (id) "Bayar (TUNAI) 23.000" else "Paid (CASH) 23,000"))
+                    assertFalse(text.contains("Change"))
+                    assertFalse(text.contains("Kembali"))
+                } else {
+                    assertTrue(text.contains(if (id) "Pembayaran: Tunai" else "Payment: Cash"))
+                    assertTrue(text.contains(if (id) "Dibayar Rp 23.000" else "Paid Rp 23,000"))
+                    assertTrue(text.contains(if (id) "Kembalian Rp 0" else "Change Rp 0"))
+                }
+                for (label in listOf("Responsible customer", "Penanggung jawab", "Initial payment", "Bayar awal",
+                    "Outstanding", "Sisa utang", "Credit status", "Status utang", "Original customer")) {
+                    assertFalse(label, text.contains(label))
+                }
+            }
+        }
+    }
+
     @Test fun blankOptionalValuesProduceNoLabels() {
         val result = Receipt.text(sale().copy(
             customerName = "", customerPhone = "", shop = ShopSettings(shopName = "", footer = ""),

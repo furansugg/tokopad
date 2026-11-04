@@ -3,12 +3,16 @@ package com.tokopad.app
 import android.graphics.Bitmap
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.hasScrollToIndexAction
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToIndex
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextReplacement
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -54,7 +58,9 @@ class AppSmokeTest {
     fun realLaunch_navigation_languageSwitch_andScreenshots() {
         waitForText("Overview")
         compose.onNodeWithText("Overview").assertIsDisplayed()
+        compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("New sale"))
         compose.onNodeWithText("New sale").assertIsDisplayed()
+        compose.onNode(hasScrollToIndexAction()).performScrollToIndex(0)
         compose.onNodeWithText("The Daily Store").assertIsDisplayed()
         listOf("Home", "Checkout", "Products", "More").forEach { label ->
             compose.onNodeWithText(label).assertIsDisplayed()
@@ -65,6 +71,7 @@ class AppSmokeTest {
         compose.onNodeWithText("Choose dates").assertIsDisplayed()
         compose.onNodeWithText("Cancel").performClick()
 
+        compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText(electricityReceipt.receiptNumber))
         compose.onNodeWithText(electricityReceipt.receiptNumber).performScrollTo().performClick()
         compose.onNodeWithText("Receipt", substring = false).assertIsDisplayed()
         screenshot("invoice-pln")
