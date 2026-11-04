@@ -6,7 +6,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasClickAction
-import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.hasScrollToIndexAction
 import androidx.compose.ui.test.isDialog
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
@@ -16,7 +16,6 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToIndex
-import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextReplacement
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -26,13 +25,10 @@ import org.junit.Test
 import org.junit.rules.ExternalResource
 import org.junit.runner.RunWith
 import java.security.MessageDigest
-import java.text.SimpleDateFormat
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
-import java.util.Date
-import java.util.TimeZone
 
 @RunWith(AndroidJUnit4::class)
 class HistoryDateRangeTest {
@@ -116,21 +112,16 @@ class HistoryDateRangeTest {
         compose.onNode(hasScrollToIndexAction()).performScrollToIndex(0)
         compose.onNodeWithText(range).performClick()
         waitForText("Choose dates")
-        val pattern = android.text.format.DateFormat.getBestDateTimePattern(Locale.ENGLISH, "yMMMMEEEEd")
-        val dateDescription = SimpleDateFormat(pattern, Locale.ENGLISH).apply {
-            timeZone = TimeZone.getTimeZone("UTC")
-        }.format(Date(today.toEpochDay() * 86_400_000L))
-        val todayDay = hasContentDescription(dateDescription, substring = true) and hasClickAction()
-        compose.onNode(hasScrollToIndexAction() and hasAnyAncestor(isDialog())).performScrollToNode(todayDay)
-        compose.onNode(todayDay).performClick()
-        compose.onNode(todayDay).performClick()
+        val boundaryDay = hasText(today.minusDays(29).dayOfMonth.toString()) and hasClickAction() and hasAnyAncestor(isDialog())
+        compose.onNode(boundaryDay).performClick()
+        compose.onNode(boundaryDay).performClick()
         compose.onNodeWithText("Apply dates").performClick()
-        waitForText("Today")
+        waitForText(today.minusDays(29).format(formatter))
         waitUntilNotBusy()
         compose.onNode(hasScrollToIndexAction()).performScrollToIndex(3)
-        waitForText(todaySale.receiptNumber)
+        waitForText(boundarySale.receiptNumber)
         compose.onNode(hasScrollToIndexAction()).performScrollToIndex(0)
-        compose.onNodeWithText("Receipt or customer name").performTextReplacement(boundarySale.receiptNumber)
+        compose.onNodeWithText("Receipt or customer name").performTextReplacement(todaySale.receiptNumber)
         compose.onNodeWithText("Search").performClick()
         dismissKeyboard()
         waitForText("No matching transactions")
@@ -139,7 +130,7 @@ class HistoryDateRangeTest {
         dismissKeyboard()
         waitUntilNotBusy()
         compose.onNode(hasScrollToIndexAction()).performScrollToIndex(3)
-        waitForText(todaySale.receiptNumber)
+        waitForText(boundarySale.receiptNumber)
 
         compose.onNodeWithTag("nav-dashboard").performClick()
         waitForText("Overview")
