@@ -21,6 +21,7 @@ The manual **Signed release** workflow additionally builds an AAB, using the `pr
 3. In **Settings → General**, enter shop details, choose English/Indonesian and System/Light/Dark theme. In **Receipt**, choose shop name, logo, or both; edit header/footer and paper width, then save. Logo images are copied into app data, reduced to monochrome (maximum 384 × 192), and included in backups. No broad photo-library permission is required.
 4. Open the printer shortcut in the header or **Settings → Printer**. Pair an ESC/POS Bluetooth Classic printer in Android settings. Refresh paired printers, select one (saved automatically), test the connection, then test print. Nearby-device permission and Bluetooth enablement are requested when needed. Connection tests close the socket afterward; printing establishes a fresh connection.
 5. View sales in **History**. Reprint without duplicating sales; cancel mistakes with a reason. Cancellation adjusts records/stock, not external payments.
+   A receipt for one PLN unit offers **Buy again**: review the copied buyer details and current price, enter a new token, and add it to the cart before completing a new sale.
 6. Export backups regularly. Keep backup files private: they contain customer details, tokens, and transactions, **without encryption**. Import first requires saving a safety backup, then confirmation to replace local data.
 
 ### Customer debt

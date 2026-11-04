@@ -151,9 +151,9 @@ fun HistoryScreen(sales: List<Sale>, language: String, from: Long, to: Long, que
             Text(l(language, "History", "Riwayat"), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold, color = SalesInk)
             DateRange(language, from, to, onRange)
         } }
-        item { OutlinedTextField(search, { search = it }, Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), leadingIcon = { PadIcon("search") }, label = { Text(l(language, "Transaction number", "Nomor transaksi")) }, trailingIcon = { TextButton(onClick = { onSearch(search) }) { Text(l(language, "Search", "Cari")) } }, singleLine = true) }
+        item { OutlinedTextField(search, { search = it }, Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), leadingIcon = { PadIcon("search") }, label = { Text(l(language, "Receipt or customer name", "Nota atau nama pelanggan")) }, trailingIcon = { TextButton(onClick = { onSearch(search) }) { Text(l(language, "Search", "Cari")) } }, singleLine = true) }
         item { Text(l(language, "Showing up to 500 matches. Narrow the dates to find older sales.", "Maksimal 500 hasil. Persempit tanggal untuk mencari transaksi lama."), Modifier.padding(vertical = 12.dp), style = MaterialTheme.typography.bodySmall, color = SalesSecondary) }
-        if (sales.isEmpty()) item { EmptyState("history", l(language, "No matching transactions", "Tidak ada transaksi yang cocok"), l(language, "Try another date range or receipt number.", "Coba rentang tanggal atau nomor nota lain.")) }
+        if (sales.isEmpty()) item { EmptyState("history", l(language, "No matching transactions", "Tidak ada transaksi yang cocok"), l(language, "Try another date range, receipt number or customer name.", "Coba rentang tanggal, nomor nota, atau nama pelanggan lain.")) }
         items(sales, key = { it.id }) { SaleRow(it, language, onSale) }
         item { Spacer(Modifier.height(16.dp)) }
     }
@@ -188,7 +188,7 @@ private fun SaleRow(sale: Sale, language: String, onSale: (Sale) -> Unit) {
 }
 
 @Composable
-fun SaleDialog(sale: Sale, settings: ShopSettings, busy: Boolean, onDismiss: () -> Unit, onPrint: () -> Unit, onCancel: (String) -> Unit, onSettle: ((String, String) -> Unit)? = null) {
+fun SaleDialog(sale: Sale, settings: ShopSettings, busy: Boolean, onDismiss: () -> Unit, onPrint: () -> Unit, onCancel: (String) -> Unit, onSettle: ((String, String) -> Unit)? = null, onBuyAgain: () -> Unit = {}) {
     var cancelling by remember(sale.id) { mutableStateOf(false) }
     var reason by remember { mutableStateOf("") }
     var settling by rememberSaveable(sale.id) { mutableStateOf(false) }
@@ -232,6 +232,9 @@ fun SaleDialog(sale: Sale, settings: ShopSettings, busy: Boolean, onDismiss: () 
                     Text(l(language, "Final settlement: ", "Pelunasan akhir: ") + money(settlement.amount, language) + "\n" + date + " · " + (if (settlement.payment == "cash") l(language, "Cash", "Tunai") else l(language, "Noncash", "Nontunai")), Modifier.testTag("sale-settlement"))
                 }
                 if (canSettle && !cancelling) Button(onClick = { settling = true }, enabled = !busy, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("sale-settle")) { Text(l(language, "Settle debt", "Lunasi piutang")) }
+            }
+            if (sale.lines.size == 1 && sale.lines[0].product.kind == ProductKind.ELECTRICITY && sale.lines[0].quantity == 1L) {
+                TextButton(onClick = onBuyAgain, enabled = !busy, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("sale-buy-again")) { Text(l(language, "Buy again", "Beli lagi")) }
             }
             // Physical receipt paper deliberately stays white in either theme.
             Surface(shape = RoundedCornerShape(8.dp), color = Color.White, contentColor = Color.Black, border = BorderStroke(1.dp, SalesBorder)) {
@@ -281,7 +284,7 @@ private fun checkoutKinds(language: String) = listOf(
 )
 
 @Composable
-fun CheckoutScreen(products: List<Product>, customers: List<Customer>, cart: List<CartLine>, language: String, busy: Boolean, onCart: (List<CartLine>) -> Unit, onComplete: (Customer?, Long, String, Long, Boolean) -> Unit) {
+fun CheckoutScreen(products: List<Product>, customers: List<Customer>, cart: List<CartLine>, language: String, busy: Boolean, onCart: (List<CartLine>) -> Unit, onComplete: (Customer?, Long, String, Long, Boolean) -> Unit, repeatDraft: CartLine? = null, onRepeatDismiss: () -> Unit = {}) {
     var search by rememberSaveable { mutableStateOf("") }
     var selectedKind by rememberSaveable { mutableStateOf<ProductKind?>(null) }
     var adding by rememberSaveable { mutableStateOf<Product?>(null) }
@@ -480,6 +483,13 @@ fun CheckoutScreen(products: List<Product>, customers: List<Customer>, cart: Lis
         adding = null
         editing = null
     }) }
+    repeatDraft?.let { draft -> AddLineDialog(draft.product, customers, language, initialLine = draft, requireNewCode = true,
+        onDismiss = onRepeatDismiss, onAdd = { line ->
+            if (cart.size < 200) {
+                onCart(cart + line.copy(customerId = line.customerId?.takeIf { id -> customers.any { it.id == id && it.name == line.buyerName && it.meterNumber == line.destination } }))
+                onRepeatDismiss()
+            }
+        }) }
     if (confirm) AlertDialog(onDismissRequest = { if (!busy) confirm = false }, containerColor = SalesSurface, shape = RoundedCornerShape(10.dp), title = { Text(l(language, "Finish this sale?", "Selesaikan penjualan?")) },
         text = { Column(Modifier.fillMaxWidth().heightIn(max = (LocalConfiguration.current.screenHeightDp * 0.5f).dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("${cart.size} " + l(language, "items", "item") + "\n" + money(total ?: 0, language))
@@ -495,7 +505,7 @@ fun CheckoutScreen(products: List<Product>, customers: List<Customer>, cart: Lis
 }
 
 @Composable
-private fun AddLineDialog(product: Product, customers: List<Customer>, language: String, initialLine: CartLine? = null, maxQuantity: Long = 1_000_000, onDismiss: () -> Unit, onAdd: (CartLine) -> Unit) {
+private fun AddLineDialog(product: Product, customers: List<Customer>, language: String, initialLine: CartLine? = null, maxQuantity: Long = 1_000_000, requireNewCode: Boolean = false, onDismiss: () -> Unit, onAdd: (CartLine) -> Unit) {
     val context = LocalContext.current
     var quantity by rememberSaveable(product.id, initialLine) { mutableStateOf((initialLine?.quantity ?: 1).toString()) }
     var destination by rememberSaveable(product.id, initialLine) { mutableStateOf(initialLine?.destination.orEmpty()) }
@@ -514,7 +524,7 @@ private fun AddLineDialog(product: Product, customers: List<Customer>, language:
     val kwhValue = normalizedKwh.toBigDecimalOrNull()
     val validKwh = normalizedKwh.matches(Regex("[0-9]{1,7}(\\.[0-9]{1,3})?")) && kwhValue != null && kwhValue.signum() == 1 && kwhValue <= java.math.BigDecimal("1000000")
     val validDestination = destination.trim().let { value -> value.length in 3..64 && value.any { it in '0'..'9' } && value.all { it in '0'..'9' || it in "+() .-" } }
-    val valid = q != null && q in 1..maxQuantity && (!needsDestination || validDestination) && (!product.requiresCode || code.isNotBlank()) && (!electricity || (buyerName.isNotBlank() && validKwh))
+    val valid = q != null && q in 1..maxQuantity && (!needsDestination || validDestination) && (!(product.requiresCode || requireNewCode) || code.isNotBlank()) && (!electricity || (buyerName.isNotBlank() && validKwh))
     val maxHeight = (LocalConfiguration.current.screenHeightDp * 0.6f).dp
     AlertDialog(onDismissRequest = onDismiss, modifier = Modifier.imePadding(), containerColor = SalesSurface, shape = RoundedCornerShape(10.dp), title = { Text(product.name, color = SalesInk) }, text = {
         Column(Modifier.fillMaxWidth().heightIn(max = maxHeight).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -566,9 +576,9 @@ private fun AddLineDialog(product: Product, customers: List<Customer>, language:
                     },
                     supportingText = { if (needsDestination) Text(l(language, "Required: 3–64 characters; digits and phone punctuation only.", "Wajib: 3–64 karakter; hanya angka dan tanda baca telepon.")) })
                 if (electricity) OutlinedTextField(kwh, { kwh = it.take(20) }, Modifier.fillMaxWidth().testTag("digital-kwh"), shape = RoundedCornerShape(8.dp), label = { Text(l(language, "Energy (kWh)", "Energi (kWh)")) }, supportingText = { Text(l(language, "Required: 0–1,000,000, greater than zero; up to 3 decimals.", "Wajib: 0–1.000.000, lebih dari nol; maksimal 3 desimal.")) }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true, isError = kwh.isNotBlank() && !validKwh)
-                OutlinedTextField(code, { code = it.take(200) }, Modifier.fillMaxWidth().testTag("digital-code"), shape = RoundedCornerShape(8.dp), label = { Text(l(language, "Token / voucher code", "Token / kode voucher")) }, supportingText = { Text(if (product.requiresCode) l(language, "Required", "Wajib diisi") else l(language, "Optional", "Opsional")) })
+                OutlinedTextField(code, { code = it.take(200) }, Modifier.fillMaxWidth().testTag("digital-code"), shape = RoundedCornerShape(8.dp), label = { Text(l(language, "Token / voucher code", "Token / kode voucher")) }, supportingText = { Text(if (product.requiresCode || requireNewCode) l(language, "Required", "Wajib diisi") else l(language, "Optional", "Opsional")) })
                 OutlinedTextField(note, { note = it.take(500) }, Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), label = { Text(l(language, "Note (optional)", "Catatan (opsional)")) })
             }
         }
-    }, confirmButton = { TextButton(enabled = valid, modifier = Modifier.heightIn(min = 48.dp), onClick = { onAdd(CartLine(product, q ?: 1, destination.trim(), code.trim(), note.trim(), buyerName.trim(), if (electricity) normalizedKwh else "", customerId)) }) { Text(if (initialLine == null) l(language, "Add", "Tambah") else l(language, "Save", "Simpan")) } }, dismissButton = { TextButton(onClick = onDismiss, modifier = Modifier.heightIn(min = 48.dp)) { Text(l(language, "Cancel", "Batal")) } })
+    }, confirmButton = { TextButton(enabled = valid, modifier = Modifier.heightIn(min = 48.dp), onClick = { onAdd(CartLine(product, q ?: 1, destination.trim(), code.trim(), note.trim(), buyerName.trim(), if (electricity) normalizedKwh else "", customerId)) }) { Text(if (initialLine == null || requireNewCode) l(language, "Add", "Tambah") else l(language, "Save", "Simpan")) } }, dismissButton = { TextButton(onClick = onDismiss, modifier = Modifier.heightIn(min = 48.dp)) { Text(l(language, "Cancel", "Batal")) } })
 }

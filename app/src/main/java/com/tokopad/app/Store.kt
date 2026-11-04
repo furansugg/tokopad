@@ -266,9 +266,16 @@ class Store(context: Context) : java.io.Closeable {
         validRange(from, to)
         text(query, 100, "Search")
         return helper.readableDatabase.query(
-            "sales", null, "created_at >= ? AND created_at < ? AND (instr('TP-' || printf('%08d', id), ?) > 0 OR instr(number, ?) > 0)",
-            arrayOf(from.toString(), to.toString(), query, query), null, null, "created_at DESC, id DESC", "500",
-        ).use { c -> buildList { while (c.moveToNext()) add(sale(c)) } }
+            "sales", null, "created_at >= ? AND created_at < ?",
+            arrayOf(from.toString(), to.toString()), null, null, "created_at DESC, id DESC", if (query.isEmpty()) "500" else null,
+        ).use { c -> buildList {
+            while (size < 500 && c.moveToNext()) {
+                val sale = sale(c)
+                if (query.isEmpty() || sale.receiptNumber.contains(query) || c.string("number").contains(query) ||
+                    sale.customerName.contains(query, ignoreCase = true) ||
+                    sale.lines.any { it.product.kind != ProductKind.PHYSICAL && it.buyerName.contains(query, ignoreCase = true) }) add(sale)
+            }
+        } }
     }
 
     fun sale(id: Long): Sale {

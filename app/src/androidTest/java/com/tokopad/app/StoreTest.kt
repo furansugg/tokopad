@@ -571,6 +571,66 @@ class StoreTest {
         assertEquals(Dashboard(), store.dashboard(sale.createdAt, sale.createdAt))
     }
 
+    @Test fun historySearchUsesPayerAndDigitalRecipientSnapshots() {
+        val product = digital(ProductKind.DATA).copy(name = "UnrelatedProduct").also { store.saveProduct(it) }
+        val payer = Customer(name = "Élodie Payer", phone = "08111111").let { it.copy(id = store.saveCustomer(it)) }
+        val recipient = Customer(name = "Récipient Alice", phone = "08222222").let { it.copy(id = store.saveCustomer(it)) }
+        val line = CartLine(product, destination = recipient.phone, buyerName = recipient.name, customerId = recipient.id, note = "UnrelatedNote")
+        val sale = store.checkout(listOf(line), payer, 0, "cash", 100)
+        assertEquals(listOf(sale), store.sales(query = "élODIE"))
+        assertEquals(listOf(sale), store.sales(query = "rÉCIPIENT"))
+        assertEquals(listOf(sale), store.sales(query = sale.receiptNumber))
+        assertEquals(listOf(sale), store.sales(query = sale.number.substring(0, 8)))
+        assertEquals(listOf(sale), store.sales())
+        for (query in listOf("UnrelatedProduct", "UnrelatedNote", payer.phone, recipient.phone, "%", "_")) {
+            assertTrue("Unexpected match for $query", store.sales(query = query).isEmpty())
+        }
+        assertTrue(store.sales(0, sale.createdAt, "payer").isEmpty())
+        assertEquals(listOf(sale), store.sales(sale.createdAt, sale.createdAt + 1, "alice"))
+        assertTrue(store.sales(sale.createdAt, sale.createdAt, "alice").isEmpty())
+
+        store.saveCustomer(payer.copy(name = "Changed Payer"))
+        store.saveCustomer(recipient.copy(name = "Changed Recipient"))
+        assertTrue(store.sales(query = "Changed").isEmpty())
+        assertEquals(listOf(sale), store.sales(query = "payer"))
+        assertEquals(listOf(sale), store.sales(query = "alice"))
+        store.deleteCustomer(payer.id)
+        store.deleteCustomer(recipient.id)
+        store.restoreBackup(store.exportBackup())
+        val detached = store.sale(sale.id)
+        assertEquals(listOf(detached), store.sales(query = "payer"))
+        assertEquals(listOf(detached), store.sales(query = "alice"))
+    }
+
+    @Test fun historySearchTreatsWildcardsLiterallyAndIgnoresPhysicalBuyerFields() {
+        val physical = product()
+        val sale = store.checkout(listOf(CartLine(physical, buyerName = "NotARecipient")), Customer(name = "Percent%_Name"), 0, "cash", 100)
+        assertEquals(listOf(sale), store.sales(query = "%_"))
+        assertTrue(store.sales(query = "%Name").isEmpty())
+        assertTrue(store.sales(query = "NotARecipient").isEmpty())
+    }
+
+    @Test fun historySearchLimitsAfterFilteringAndReturnsNewestMatches() {
+        val product = digital(ProductKind.DATA)
+        val matching = store.checkout(listOf(CartLine(product, destination = "08111111", buyerName = "Needle")), null, 0, "cash", 100)
+        val other = store.checkout(listOf(CartLine(product, destination = "08222222", buyerName = "Other")), null, 0, "cash", 100)
+        context.openOrCreateDatabase("tokopad.db", Context.MODE_PRIVATE, null).use { db ->
+            db.execSQL("""WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM n WHERE x < 505)
+                INSERT INTO sales (number, created_at, total, customer_id, data)
+                SELECT 'other-' || x, ?, total, customer_id, data FROM sales, n WHERE id = ?""", arrayOf(other.createdAt + 1, other.id))
+            assertEquals(listOf(matching), store.sales(query = "needle"))
+            db.execSQL("""WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM n WHERE x < 505)
+                INSERT INTO sales (number, created_at, total, customer_id, data)
+                SELECT 'match-' || x, ?, total, customer_id, data FROM sales, n WHERE id = ?""", arrayOf(other.createdAt + 2, matching.id))
+        }
+        val results = store.sales(query = "needle")
+        assertEquals(500, results.size)
+        assertTrue(results.all { it.lines.single().buyerName == "Needle" })
+        assertTrue(results.zipWithNext().all { (a, b) -> a.id > b.id })
+        assertFalse(results.any { it.id == matching.id })
+        assertEquals(500, store.sales().size)
+    }
+
     @Test fun priceChangesRejectStaleCartAndDoNotAlterReceipts() {
         val product = product()
         store.saveSettings(ShopSettings(shopName = "Original shop"))

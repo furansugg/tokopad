@@ -84,6 +84,7 @@ private fun Tokopad() {
     var query by remember { mutableStateOf("") }
     var screen by rememberSaveable { mutableStateOf("dashboard") }
     var cart by rememberSaveable { mutableStateOf(emptyList<CartLine>()) }
+    var repeatDraft by rememberSaveable { mutableStateOf<CartLine?>(null) }
     var checkoutId by rememberSaveable { mutableStateOf(java.util.UUID.randomUUID().toString()) }
     var busy by remember { mutableStateOf(false) }
     var loaded by remember { mutableStateOf(false) }
@@ -256,13 +257,20 @@ private fun Tokopad() {
     }
 
     LaunchedEffect(Unit) { runTask { refresh() } }
+    LaunchedEffect(loaded, products, repeatDraft) {
+        val draft = repeatDraft
+        if (loaded && draft != null && products.none { it.id == draft.product.id && it.active && it.kind == ProductKind.ELECTRICITY }) {
+            repeatDraft = null
+            error = l(lang, "This electricity product is no longer available.", "Produk listrik ini tidak lagi tersedia.")
+        }
+    }
     LaunchedEffect(screen, settingsSection) {
         if (screen == "settings" && settingsSection == "printer" && hasBluetoothPermission() && bluetoothEnabled()) performPrinterAction("find")
     }
 
     fun navigate(target: String) {
         if (screen == "checkout" && cart.isNotEmpty() && target != screen) discardTarget = target
-        else screen = target
+        else { if (target != screen) repeatDraft = null; screen = target }
     }
 
     BackHandler(enabled = screen == "checkout" && cart.isNotEmpty()) { discardTarget = "dashboard" }
@@ -320,7 +328,11 @@ private fun Tokopad() {
                             screen = "history"
                             selectSale(sale)
                             refresh()
-                        } })
+                        } }, repeatDraft = repeatDraft?.let { draft ->
+                            products.firstOrNull { it.id == draft.product.id && it.active && it.kind == ProductKind.ELECTRICITY }?.let { product ->
+                                draft.copy(product = product, customerId = draft.customerId?.takeIf { id -> customers.any { it.id == id && it.name == draft.buyerName && it.meterNumber == draft.destination } })
+                            }
+                        }, onRepeatDismiss = { repeatDraft = null })
                     "history" -> HistoryScreen(sales, lang, from, to, query,
                         onSearch = { query = it; runTask { refresh() } }, onRange = { a, b -> from = a; to = b; runTask { refresh() } }, onSale = { selectSale(it) })
                     "products" -> ProductsScreen(products, lang) { product, saved -> runTask { withContext(Dispatchers.IO) { store.saveProduct(product) }; saved(); refresh() } }
@@ -357,6 +369,20 @@ private fun Tokopad() {
 
     selectedSale?.let { sale -> SaleDialog(sale, settings, busy, onDismiss = { selectSale(null) },
         onPrint = { requestPrinterAction("print", sale) },
+        onBuyAgain = {
+            val line = sale.lines.single()
+            val product = products.firstOrNull { it.id == line.product.id && it.active && it.kind == ProductKind.ELECTRICITY }
+            when {
+                product == null -> error = l(lang, "This electricity product is no longer available.", "Produk listrik ini tidak lagi tersedia.")
+                cart.size >= 200 -> error = l(lang, "Cart limit: 200 lines. Complete this sale before adding more.", "Batas keranjang: 200 baris. Selesaikan penjualan sebelum menambah item.")
+                else -> {
+                    repeatDraft = CartLine(product = product, destination = line.destination, buyerName = line.buyerName, kwh = line.kwh,
+                        customerId = line.customerId?.takeIf { id -> customers.any { it.id == id && it.name == line.buyerName && it.meterNumber == line.destination } })
+                    selectSale(null)
+                    screen = "checkout"
+                }
+            }
+        },
         onSettle = { payment, requestId -> runTask {
             selectSale(withContext(Dispatchers.IO) { store.settleSale(sale.id, sale.balance, payment, requestId) })
             refresh()
@@ -370,7 +396,7 @@ private fun Tokopad() {
         dismissButton = { if (screen == "settings") TextButton(onClick = { error = null; openBluetoothSettings() }) { Text("Bluetooth") } }) }
     discardTarget?.let { target -> AlertDialog(onDismissRequest = { discardTarget = null }, title = { Text(l(lang, "Discard this cart?", "Buang keranjang ini?")) },
         text = { Text(l(lang, "Unsaved items will be lost.", "Item yang belum disimpan akan hilang.")) },
-        confirmButton = { TextButton(onClick = { cart = emptyList(); checkoutId = java.util.UUID.randomUUID().toString(); screen = target; discardTarget = null }) { Text(l(lang, "Discard", "Buang")) } },
+        confirmButton = { TextButton(onClick = { cart = emptyList(); repeatDraft = null; checkoutId = java.util.UUID.randomUUID().toString(); screen = target; discardTarget = null }) { Text(l(lang, "Discard", "Buang")) } },
         dismissButton = { TextButton(onClick = { discardTarget = null }) { Text(l(lang, "Keep", "Kembali")) } }) }
     backupWarning?.let { action -> AlertDialog(onDismissRequest = { backupWarning = null },
         title = { Text(l(lang, "Sensitive backup", "Cadangan berisi data sensitif")) },
@@ -382,7 +408,7 @@ private fun Tokopad() {
         }) { Text(l(lang, "Save backup", "Simpan cadangan")) } }, dismissButton = { TextButton(onClick = { backupWarning = null }) { Text(l(lang, "Cancel", "Batal")) } }) }
     restoreText?.let { text -> AlertDialog(onDismissRequest = { restoreText = null }, title = { Text(l(lang, "Replace all data?", "Ganti semua data?")) },
         text = { Text(l(lang, "Current products, customers, transactions and settings will be replaced. Invalid backups are rejected before changing any data.", "Produk, pelanggan, transaksi, dan pengaturan saat ini akan diganti. Cadangan tidak valid ditolak sebelum data diubah.")) },
-        confirmButton = { TextButton(enabled = !busy, onClick = { restoreText = null; runTask { withContext(Dispatchers.IO) { store.restoreBackup(text) }; cart = emptyList(); checkoutId = java.util.UUID.randomUUID().toString(); selectSale(null); query = ""; refresh(); snackbar.showSnackbar(l(settings.language, "Backup restored.", "Cadangan dipulihkan.")) } }) { Text(l(lang, "Replace data", "Ganti data")) } },
+        confirmButton = { TextButton(enabled = !busy, onClick = { restoreText = null; runTask { withContext(Dispatchers.IO) { store.restoreBackup(text) }; cart = emptyList(); repeatDraft = null; checkoutId = java.util.UUID.randomUUID().toString(); selectSale(null); query = ""; refresh(); snackbar.showSnackbar(l(settings.language, "Backup restored.", "Cadangan dipulihkan.")) } }) { Text(l(lang, "Replace data", "Ganti data")) } },
         dismissButton = { TextButton(onClick = { restoreText = null }) { Text(l(lang, "Cancel", "Batal")) } }) }
     customerHistory?.let { history -> AlertDialog(onDismissRequest = { customerHistory = null }, title = { Text(history.customer.name) },
         text = { LazyColumn(Modifier.heightIn(max = 450.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
