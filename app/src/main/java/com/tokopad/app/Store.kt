@@ -270,10 +270,21 @@ class Store(context: Context) : java.io.Closeable {
             arrayOf(from.toString(), to.toString()), null, null, "created_at DESC, id DESC", if (query.isEmpty()) "500" else null,
         ).use { c -> buildList {
             while (size < 500 && c.moveToNext()) {
-                val sale = sale(c)
-                if (query.isEmpty() || sale.receiptNumber.contains(query) || c.string("number").contains(query) ||
-                    sale.customerName.contains(query, ignoreCase = true) ||
-                    sale.lines.any { it.product.kind != ProductKind.PHYSICAL && it.buyerName.contains(query, ignoreCase = true) }) add(sale)
+                if (query.isEmpty()) {
+                    add(sale(c))
+                    continue
+                }
+                val receiptNumber = "TP-${c.long("id").toString().padStart(8, '0')}"
+                if (receiptNumber.contains(query) || c.string("number").contains(query)) {
+                    add(sale(c))
+                    continue
+                }
+                val data = JSONObject(c.string("data"))
+                if (data.string("customerName").contains(query, ignoreCase = true) ||
+                    data.objects("lines", MAX_LINES).any {
+                        ProductKind.valueOf(it.getJSONObject("product").string("kind")) != ProductKind.PHYSICAL &&
+                            it.optionalString("buyerName").contains(query, ignoreCase = true)
+                    }) add(sale(c, data))
             }
         } }
     }
@@ -419,7 +430,7 @@ class Store(context: Context) : java.io.Closeable {
 
     private fun product(c: Cursor): Product = parseProduct(JSONObject(c.string("data"))).copy(id = c.long("id"), stock = c.long("stock"))
     private fun customer(c: Cursor): Customer = parseCustomer(JSONObject(c.string("data"))).copy(id = c.long("id"))
-    private fun sale(c: Cursor): Sale = parseSale(JSONObject(c.string("data"))).copy(
+    private fun sale(c: Cursor, data: JSONObject = JSONObject(c.string("data"))): Sale = parseSale(data).copy(
         id = c.long("id"), customerId = c.nullableLong("customer_id"),
         cancelledAt = c.nullableLong("cancelled_at"), cancellationReason = c.string("cancellation_reason"),
     )

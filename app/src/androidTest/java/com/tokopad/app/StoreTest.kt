@@ -610,6 +610,28 @@ class StoreTest {
         assertTrue(store.sales(query = "NotARecipient").isEmpty())
     }
 
+    @Test fun historySearchHandlesUnicodeAndMissingLegacyBuyerName() {
+        val product = digital(ProductKind.DATA)
+        val sale = store.checkout(
+            listOf(CartLine(product, destination = "08111111", buyerName = "ΣΊΓΜΑ")),
+            Customer(name = "МОСКВА"), 0, "cash", 100,
+        )
+        assertEquals(listOf(sale), store.sales(query = "москва"))
+        assertEquals(listOf(sale), store.sales(query = "σίγμα"))
+        assertTrue(store.sales(query = sale.receiptNumber.lowercase()).isEmpty())
+
+        context.openOrCreateDatabase("tokopad.db", Context.MODE_PRIVATE, null).use { db ->
+            val data = db.rawQuery("SELECT data FROM sales WHERE id = ?", arrayOf(sale.id.toString())).use { c ->
+                check(c.moveToFirst())
+                JSONObject(c.getString(0))
+            }
+            data.getJSONArray("lines").getJSONObject(0).remove("buyerName")
+            db.execSQL("UPDATE sales SET data = ? WHERE id = ?", arrayOf<Any>(data.toString(), sale.id))
+        }
+        assertTrue(store.sales(query = "σίγμα").isEmpty())
+        assertEquals(listOf(store.sale(sale.id)), store.sales(query = "москва"))
+    }
+
     @Test fun historySearchLimitsAfterFilteringAndReturnsNewestMatches() {
         val product = digital(ProductKind.DATA)
         val matching = store.checkout(listOf(CartLine(product, destination = "08111111", buyerName = "Needle")), null, 0, "cash", 100)
