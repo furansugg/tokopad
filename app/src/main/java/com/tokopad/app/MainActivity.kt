@@ -78,10 +78,13 @@ private fun Tokopad() {
     var products by remember { mutableStateOf(emptyList<Product>()) }
     var customers by remember { mutableStateOf(emptyList<Customer>()) }
     var sales by remember { mutableStateOf(emptyList<Sale>()) }
+    var dashboardSales by remember { mutableStateOf(emptyList<Sale>()) }
     var dashboard by remember { mutableStateOf(Dashboard()) }
     var from by remember { mutableLongStateOf(java.time.LocalDate.now().toEpochDay()) }
     var to by remember { mutableLongStateOf(from) }
-    var query by remember { mutableStateOf("") }
+    var historyFrom by rememberSaveable { mutableLongStateOf(java.time.LocalDate.now().toEpochDay() - 29) }
+    var historyTo by rememberSaveable { mutableLongStateOf(historyFrom + 29) }
+    var query by rememberSaveable { mutableStateOf("") }
     var screen by rememberSaveable { mutableStateOf("dashboard") }
     var cart by rememberSaveable { mutableStateOf(emptyList<CartLine>()) }
     var repeatDraft by rememberSaveable { mutableStateOf<CartLine?>(null) }
@@ -119,13 +122,16 @@ private fun Tokopad() {
         val zone = java.time.ZoneId.systemDefault()
         val start = java.time.LocalDate.ofEpochDay(from).atStartOfDay(zone).toInstant().toEpochMilli()
         val end = java.time.LocalDate.ofEpochDay(to + 1).atStartOfDay(zone).toInstant().toEpochMilli()
+        val historyStart = java.time.LocalDate.ofEpochDay(historyFrom).atStartOfDay(zone).toInstant().toEpochMilli()
+        val historyEnd = java.time.LocalDate.ofEpochDay(historyTo + 1).atStartOfDay(zone).toInstant().toEpochMilli()
         val data = withContext(Dispatchers.IO) {
-            AppData(store.settings(), store.products(true), store.customers(), store.sales(start, end, query), store.dashboard(start, end))
+            AppData(store.settings(), store.products(true), store.customers(), store.sales(historyStart, historyEnd, query), store.sales(start, end), store.dashboard(start, end))
         }
         settings = data.settings
         products = data.products
         customers = data.customers
         sales = data.sales
+        dashboardSales = data.dashboardSales
         dashboard = data.dashboard
         if (selectedSale == null) selectedSaleId?.let { id ->
             selectedSale = withContext(Dispatchers.IO) { store.sale(id) }
@@ -270,7 +276,18 @@ private fun Tokopad() {
 
     fun navigate(target: String) {
         if (screen == "checkout" && cart.isNotEmpty() && target != screen) discardTarget = target
-        else { if (target != screen) repeatDraft = null; screen = target }
+        else {
+            if (target != screen) {
+                repeatDraft = null
+                if (target == "history") {
+                    historyTo = java.time.LocalDate.now().toEpochDay()
+                    historyFrom = historyTo - 29
+                    query = ""
+                    runTask { refresh() }
+                }
+            }
+            screen = target
+        }
     }
 
     BackHandler(enabled = screen == "checkout" && cart.isNotEmpty()) { discardTarget = "dashboard" }
@@ -319,12 +336,15 @@ private fun Tokopad() {
             } else Box(Modifier.weight(1f)) {
                 when (screen) {
                     "more" -> ShopMenu(lang, settings.shopName, onNavigate = { if (it == "settings") settingsSection = "general"; navigate(it) })
-                    "dashboard" -> DashboardScreen(dashboard, sales.take(5), lang, from, to, onRange = { a, b -> from = a; to = b; runTask { refresh() } }, onCheckout = { navigate("checkout") }, onSale = { selectSale(it) })
+                    "dashboard" -> DashboardScreen(dashboard, dashboardSales.take(5), lang, from, to, onRange = { a, b -> from = a; to = b; runTask { refresh() } }, onCheckout = { navigate("checkout") }, onSale = { selectSale(it) })
                     "checkout" -> CheckoutScreen(products.filter { it.active }, customers, cart, lang, busy,
                         onCart = { cart = it }, onComplete = { customer, discount, payment, paid, isCredit -> runTask {
                             val sale = withContext(Dispatchers.IO) { store.checkout(cart, customer, discount, payment, paid, checkoutId, isCredit) }
                             cart = emptyList()
                             checkoutId = java.util.UUID.randomUUID().toString()
+                            historyTo = java.time.LocalDate.now().toEpochDay()
+                            historyFrom = historyTo - 29
+                            query = ""
                             screen = "history"
                             selectSale(sale)
                             refresh()
@@ -333,8 +353,8 @@ private fun Tokopad() {
                                 draft.copy(product = product, customerId = draft.customerId?.takeIf { id -> customers.any { it.id == id && it.name == draft.buyerName && it.meterNumber == draft.destination } })
                             }
                         }, onRepeatDismiss = { repeatDraft = null })
-                    "history" -> HistoryScreen(sales, lang, from, to, query,
-                        onSearch = { query = it; runTask { refresh() } }, onRange = { a, b -> from = a; to = b; runTask { refresh() } }, onSale = { selectSale(it) })
+                    "history" -> HistoryScreen(sales, lang, historyFrom, historyTo, query,
+                        onSearch = { query = it; runTask { refresh() } }, onRange = { a, b -> historyFrom = a; historyTo = b; runTask { refresh() } }, onSale = { selectSale(it) })
                     "products" -> ProductsScreen(products, lang) { product, saved -> runTask { withContext(Dispatchers.IO) { store.saveProduct(product) }; saved(); refresh() } }
                     "customers" -> CustomersScreen(customers, lang,
                         onSave = { customer, saved -> runTask { withContext(Dispatchers.IO) { store.saveCustomer(customer) }; saved(); refresh() } },
@@ -475,7 +495,7 @@ private fun ShopMenu(language: String, shopName: String, onNavigate: (String) ->
     }
 }
 
-private data class AppData(val settings: ShopSettings, val products: List<Product>, val customers: List<Customer>, val sales: List<Sale>, val dashboard: Dashboard)
+private data class AppData(val settings: ShopSettings, val products: List<Product>, val customers: List<Customer>, val sales: List<Sale>, val dashboardSales: List<Sale>, val dashboard: Dashboard)
 private data class CustomerHistory(val customer: Customer, val sales: List<Sale>, val outstanding: List<Sale>)
 
 internal fun operationError(error: Exception, language: String): String {
