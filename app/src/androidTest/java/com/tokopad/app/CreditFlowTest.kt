@@ -97,7 +97,7 @@ class CreditFlowTest {
         val product = seededProducts.single { it.kind == ProductKind.DATA }
         fun addRecipient() {
             compose.onNodeWithTag("nav-checkout").performClick()
-            waitForText("Checkout")
+            compose.onNodeWithTag("checkout-products").assertIsSelected()
             screenTag("checkout-kind-DATA").performClick()
             compose.onNodeWithText(product.name).performClick()
             compose.onNodeWithTag("digital-buyer-${recipient.id}").performScrollTo().performClick()
