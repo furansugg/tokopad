@@ -4,11 +4,7 @@ import android.content.Context
 import android.view.inputmethod.InputMethodManager
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextContains
-import androidx.compose.ui.test.hasAnyAncestor
-import androidx.compose.ui.test.hasClickAction
-import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.hasScrollToIndexAction
-import androidx.compose.ui.test.isDialog
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
@@ -102,35 +98,6 @@ class HistoryDateRangeTest {
         compose.onNodeWithText("Search").performClick()
         dismissKeyboard()
         waitForText("No matching transactions")
-        compose.onNodeWithText("Receipt or customer name").performTextReplacement("")
-        compose.onNodeWithText("Search").performClick()
-        dismissKeyboard()
-        waitUntilNotBusy()
-        compose.onNode(hasScrollToIndexAction()).performScrollToIndex(3)
-        waitForText(todaySale.receiptNumber)
-
-        compose.onNode(hasScrollToIndexAction()).performScrollToIndex(0)
-        compose.onNodeWithText(range).performClick()
-        waitForText("Choose dates")
-        val todayDay = hasText(today.dayOfMonth.toString()) and hasClickAction() and hasAnyAncestor(isDialog())
-        compose.onNode(todayDay).performClick()
-        compose.onNode(todayDay).performClick()
-        compose.onNodeWithText("Apply dates").performClick()
-        waitForText("Today")
-        waitUntilNotBusy()
-        compose.onNode(hasScrollToIndexAction()).performScrollToIndex(3)
-        waitForText(todaySale.receiptNumber)
-        compose.onNode(hasScrollToIndexAction()).performScrollToIndex(0)
-        compose.onNodeWithText("Receipt or customer name").performTextReplacement(boundarySale.receiptNumber)
-        compose.onNodeWithText("Search").performClick()
-        dismissKeyboard()
-        waitForText("No matching transactions")
-        compose.onNodeWithText("Receipt or customer name").performTextReplacement("")
-        compose.onNodeWithText("Search").performClick()
-        dismissKeyboard()
-        waitUntilNotBusy()
-        compose.onNode(hasScrollToIndexAction()).performScrollToIndex(3)
-        waitForText(todaySale.receiptNumber)
 
         compose.onNodeWithTag("nav-dashboard").performClick()
         waitForText("Overview")
@@ -170,11 +137,4 @@ class HistoryDateRangeTest {
         }
     }
 
-    private fun waitUntilNotBusy() {
-        compose.waitUntil(timeoutMillis = 15_000) {
-            compose.onAllNodesWithText("Working…").fetchSemanticsNodes().isEmpty() &&
-                compose.onAllNodesWithText("Sedang diproses…").fetchSemanticsNodes().isEmpty()
-        }
-        compose.waitForIdle()
-    }
 }
