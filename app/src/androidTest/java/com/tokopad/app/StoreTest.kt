@@ -571,6 +571,37 @@ class StoreTest {
         assertEquals(Dashboard(), store.dashboard(sale.createdAt, sale.createdAt))
     }
 
+    @Test fun saleRangeIterationIncludesAllSalesInNewestFirstOrder() {
+        val product = product()
+        val sale = store.checkout(listOf(CartLine(product)), null, 0, "cash", 100)
+        store.cancelSale(sale.id, "Correction")
+        val start = sale.createdAt + 1
+        context.openOrCreateDatabase("tokopad.db", Context.MODE_PRIVATE, null).use { db ->
+            val data = db.rawQuery("SELECT data FROM sales WHERE id = ?", arrayOf(sale.id.toString())).use { c ->
+                check(c.moveToFirst())
+                JSONObject(c.getString(0)).put("createdAt", start).toString()
+            }
+            db.execSQL("""WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM n WHERE x < 505)
+                INSERT INTO sales (number, created_at, total, customer_id, cancelled_at, data)
+                SELECT 'export-' || x, ?, total, customer_id, cancelled_at, ? FROM sales, n WHERE id = ?""",
+                arrayOf(start, data, sale.id))
+        }
+        val results = mutableListOf<Sale>()
+        store.forEachSaleInRange(start, start + 1) { results.add(it) }
+        assertEquals(505, results.size)
+        assertTrue(results.all { it.createdAt == start && it.cancelledAt != null })
+        assertTrue(results.zipWithNext().all { (a, b) -> a.id > b.id })
+        val all = mutableListOf<Sale>()
+        store.forEachSaleInRange(sale.createdAt, start + 1) { all.add(it) }
+        assertEquals(results + store.sale(sale.id), all)
+        val empty = mutableListOf<Sale>()
+        store.forEachSaleInRange(sale.createdAt, start) { empty.add(it) }
+        assertEquals(listOf(store.sale(sale.id)), empty)
+        empty.clear()
+        store.forEachSaleInRange(start, start) { empty.add(it) }
+        assertTrue(empty.isEmpty())
+    }
+
     @Test fun historySearchUsesPayerAndDigitalRecipientSnapshots() {
         val product = digital(ProductKind.DATA).copy(name = "UnrelatedProduct").also { store.saveProduct(it) }
         val payer = Customer(name = "Élodie Payer", phone = "08111111").let { it.copy(id = store.saveCustomer(it)) }

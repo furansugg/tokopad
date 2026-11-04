@@ -144,18 +144,33 @@ fun DashboardScreen(data: Dashboard, sales: List<Sale>, language: String, from: 
 }
 
 @Composable
-fun HistoryScreen(sales: List<Sale>, language: String, from: Long, to: Long, query: String, onSearch: (String) -> Unit, onRange: (Long, Long) -> Unit, onSale: (Sale) -> Unit) {
+fun HistoryScreen(sales: List<Sale>, language: String, from: Long, to: Long, query: String, onSearch: (String) -> Unit, onRange: (Long, Long) -> Unit, onSale: (Sale) -> Unit, onExport: () -> Unit) {
     var search by remember(query) { mutableStateOf(query) }
     LazyColumn(Modifier.fillMaxSize().background(SalesBackground), contentPadding = PaddingValues(16.dp)) {
         item { Column(Modifier.fillMaxWidth().padding(bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(l(language, "History", "Riwayat"), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold, color = SalesInk)
             DateRange(language, from, to, onRange)
+            OutlinedButton(onClick = onExport, modifier = Modifier.heightIn(min = 48.dp).testTag("history-export-csv")) { Text(l(language, "Export CSV", "Ekspor CSV")) }
+            Text(l(language, "Export includes all sales by sale date, including cancellations; search and the 500-result limit do not apply.", "Ekspor mencakup semua penjualan berdasarkan tanggal penjualan, termasuk pembatalan; pencarian dan batas 500 hasil tidak berlaku."), style = MaterialTheme.typography.bodySmall, color = SalesSecondary)
         } }
         item { OutlinedTextField(search, { search = it }, Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), leadingIcon = { PadIcon("search") }, label = { Text(l(language, "Receipt or customer name", "Nota atau nama pelanggan")) }, trailingIcon = { TextButton(onClick = { onSearch(search) }) { Text(l(language, "Search", "Cari")) } }, singleLine = true) }
         item { Text(l(language, "Showing up to 500 matches. Narrow the dates to find older sales.", "Maksimal 500 hasil. Persempit tanggal untuk mencari transaksi lama."), Modifier.padding(vertical = 12.dp), style = MaterialTheme.typography.bodySmall, color = SalesSecondary) }
         if (sales.isEmpty()) item { EmptyState("history", l(language, "No matching transactions", "Tidak ada transaksi yang cocok"), l(language, "Try another date range, receipt number or customer name.", "Coba rentang tanggal, nomor nota, atau nama pelanggan lain.")) }
         items(sales, key = { it.id }) { SaleRow(it, language, onSale) }
         item { Spacer(Modifier.height(16.dp)) }
+    }
+}
+
+@Composable
+fun OutstandingDebtsScreen(sales: List<Sale>, language: String, onSale: (Sale) -> Unit) {
+    LazyColumn(Modifier.fillMaxSize().background(SalesBackground).testTag("outstanding-debts"), contentPadding = PaddingValues(16.dp)) {
+        item { Column(Modifier.fillMaxWidth().padding(bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(l(language, "Outstanding debts", "Piutang belum lunas"), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold, color = SalesInk)
+            Text(l(language, "All customers · all dates", "Semua pelanggan · semua tanggal"), style = MaterialTheme.typography.bodyMedium, color = SalesSecondary)
+            Text(money(sales.sumOf { it.balance }, language), Modifier.testTag("outstanding-debts-total"), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+        } }
+        if (sales.isEmpty()) item { EmptyState("receipt", l(language, "No outstanding debts", "Tidak ada piutang belum lunas"), l(language, "Unsettled sales will appear here.", "Penjualan yang belum lunas akan tampil di sini.")) }
+        items(sales, key = { it.id }) { SaleRow(it, language, onSale) }
     }
 }
 

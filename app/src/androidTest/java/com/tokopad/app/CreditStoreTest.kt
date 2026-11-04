@@ -296,13 +296,43 @@ class CreditStoreTest {
         assertFalse(store.salesForCustomer(buyer.id).any { it.id == debts.first().id })
         assertEquals(501, store.outstandingForCustomer(buyer.id).size)
         assertEquals(expected, store.outstandingForCustomer(buyer.id))
+        assertEquals(expected, store.outstandingSales())
         assertEquals(Dashboard(50_300, 503, 200, 50_100), store.dashboard(0, Long.MAX_VALUE))
         assertEquals(Dashboard(0, 0, 0, 50_100), store.dashboard(0, 0))
         store.restoreBackup(store.exportBackup())
         store.close()
         store = Store(context)
         assertEquals(expected, store.outstandingForCustomer(buyer.id))
+        assertEquals(expected, store.outstandingSales())
         rejected { store.deleteCustomer(buyer.id) }
+    }
+
+    @Test fun outstandingSalesIncludesAllDatesAndCustomersButNotSettledOrCancelled() {
+        val product = product(trackStock = false)
+        val first = customer("First")
+        val second = customer("Second")
+        assertTrue(store.outstandingSales().isEmpty())
+        val old = store.checkout(listOf(CartLine(product)), first, 0, "cash", 0, isCredit = true)
+        val newer = store.checkout(listOf(CartLine(product)), second, 0, "cash", 30, isCredit = true)
+        val sameTime = store.checkout(listOf(CartLine(product)), first, 0, "cash", 20, isCredit = true)
+        val settled = store.checkout(listOf(CartLine(product)), second, 0, "cash", 0, isCredit = true)
+        val cancelled = store.checkout(listOf(CartLine(product)), first, 0, "cash", 0, isCredit = true)
+        store.checkout(listOf(CartLine(product)), first, 0, "cash", 100)
+        store.settleSale(settled.id, 100, "cash", request())
+        store.cancelSale(cancelled.id, "Correction")
+        store.restoreBackup(editedBackup { data ->
+            val sales = data.getJSONArray("sales")
+            for (index in 0 until sales.length()) {
+                val sale = sales.getJSONObject(index)
+                if (sale.getLong("id") == old.id) sale.put("createdAt", 1000)
+                if (sale.getLong("id") == newer.id || sale.getLong("id") == sameTime.id) sale.put("createdAt", 2000)
+            }
+        })
+        val expected = listOf(store.sale(sameTime.id), store.sale(newer.id), store.sale(old.id))
+        assertEquals(expected, store.outstandingSales())
+        store.close()
+        store = Store(context)
+        assertEquals(expected, store.outstandingSales())
     }
 
     @Test fun dashboardSeparatesSaleDateSettlementDateAndAllTimeOutstanding() {

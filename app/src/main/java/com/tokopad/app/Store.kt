@@ -289,6 +289,15 @@ class Store(context: Context) : java.io.Closeable {
         } }
     }
 
+    /** Iterates all sales in the range without applying the history search or result limit. Call on an IO thread. */
+    fun forEachSaleInRange(from: Long, to: Long, consume: (Sale) -> Unit) {
+        validRange(from, to)
+        helper.readableDatabase.query(
+            "sales", null, "created_at >= ? AND created_at < ?",
+            arrayOf(from.toString(), to.toString()), null, null, "created_at DESC, id DESC",
+        ).use { c -> while (c.moveToNext()) consume(sale(c)) }
+    }
+
     fun sale(id: Long): Sale {
         validId(id)
         return findSale(helper.readableDatabase, id) ?: throw IllegalArgumentException("Sale not found")
@@ -301,6 +310,11 @@ class Store(context: Context) : java.io.Closeable {
             null, null, "created_at DESC, id DESC", "500",
         ).use { c -> buildList { while (c.moveToNext()) add(sale(c)) } }
     }
+
+    fun outstandingSales(): List<Sale> = helper.readableDatabase.query(
+        "sales", null, "outstanding > 0 AND cancelled_at IS NULL", null,
+        null, null, "created_at DESC, id DESC",
+    ).use { c -> buildList { while (c.moveToNext()) add(sale(c)) } }
 
     fun outstandingForCustomer(customerId: Long): List<Sale> {
         validId(customerId)

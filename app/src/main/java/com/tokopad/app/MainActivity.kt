@@ -44,9 +44,12 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.text.NumberFormat
@@ -78,6 +81,7 @@ private fun Tokopad() {
     var products by remember { mutableStateOf(emptyList<Product>()) }
     var customers by remember { mutableStateOf(emptyList<Customer>()) }
     var sales by remember { mutableStateOf(emptyList<Sale>()) }
+    var outstandingSales by remember { mutableStateOf(emptyList<Sale>()) }
     var dashboardSales by remember { mutableStateOf(emptyList<Sale>()) }
     var dashboard by remember { mutableStateOf(Dashboard()) }
     var from by remember { mutableLongStateOf(java.time.LocalDate.now().toEpochDay()) }
@@ -97,7 +101,23 @@ private fun Tokopad() {
     var printers by remember { mutableStateOf(emptyList<Pair<String, String>>()) }
     var discardTarget by remember { mutableStateOf<String?>(null) }
     var backupWarning by remember { mutableStateOf<String?>(null) }
+    var csvWarning by rememberSaveable { mutableStateOf(false) }
+    var csvFrom by rememberSaveable { mutableStateOf<Long?>(null) }
+    var csvTo by rememberSaveable { mutableStateOf<Long?>(null) }
     var safetyBackup by remember { mutableStateOf<String?>(null) }
+    val backupPreferences = remember { context.getSharedPreferences("backup_reminder", android.content.Context.MODE_PRIVATE) }
+    var backupDue by remember { mutableStateOf(false) }
+    fun updateBackupReminder() {
+        val lastBackup = if (backupPreferences.contains("last_backup")) backupPreferences.getLong("last_backup", 0) else null
+        backupDue = backupReminderDue(lastBackup, System.currentTimeMillis())
+    }
+    DisposableEffect(context) {
+        val lifecycle = (context as ComponentActivity).lifecycle
+        val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_RESUME) updateBackupReminder() }
+        lifecycle.addObserver(observer)
+        updateBackupReminder()
+        onDispose { lifecycle.removeObserver(observer) }
+    }
     var restoreText by remember { mutableStateOf<String?>(null) }
     var customerHistory by remember { mutableStateOf<CustomerHistory?>(null) }
     var settingsSection by rememberSaveable { mutableStateOf("general") }
@@ -125,7 +145,7 @@ private fun Tokopad() {
         val historyStart = java.time.LocalDate.ofEpochDay(historyFrom).atStartOfDay(zone).toInstant().toEpochMilli()
         val historyEnd = java.time.LocalDate.ofEpochDay(historyTo + 1).atStartOfDay(zone).toInstant().toEpochMilli()
         val data = withContext(Dispatchers.IO) {
-            AppData(store.settings(), store.products(true), store.customers(), store.sales(historyStart, historyEnd, query), store.sales(start, end), store.dashboard(start, end))
+            AppData(store.settings(), store.products(true), store.customers(), store.sales(historyStart, historyEnd, query), store.sales(start, end), store.dashboard(start, end), store.outstandingSales())
         }
         settings = data.settings
         products = data.products
@@ -133,6 +153,7 @@ private fun Tokopad() {
         sales = data.sales
         dashboardSales = data.dashboardSales
         dashboard = data.dashboard
+        outstandingSales = data.outstandingSales
         if (selectedSale == null) selectedSaleId?.let { id ->
             selectedSale = withContext(Dispatchers.IO) { store.sale(id) }
         }
@@ -256,10 +277,33 @@ private fun Tokopad() {
                     output.write(text.toByteArray(Charsets.UTF_8))
                 }
             }
+            if (safety == null) {
+                backupPreferences.edit().putLong("last_backup", System.currentTimeMillis()).apply()
+                updateBackupReminder()
+            }
             safetyBackup = null
             if (safety != null) openBackup.launch(arrayOf("application/json", "text/plain", "application/octet-stream"))
             else snackbar.showSnackbar(l(lang, "Backup saved.", "Cadangan tersimpan."))
         } else safetyBackup = null
+    }
+    val createCsv = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
+        val start = csvFrom
+        val end = csvTo
+        csvFrom = null
+        csvTo = null
+        if (uri != null && start != null && end != null) scope.launch {
+            androidx.compose.runtime.snapshotFlow { busy }.first { !it }
+            runTask {
+                withContext(Dispatchers.IO) {
+                    val output = requireNotNull(context.contentResolver.openOutputStream(uri, "wt")) { "Cannot write CSV" }
+                    output.writer(Charsets.UTF_8).buffered().use { writer ->
+                        SalesCsv.writeHeader(writer)
+                        store.forEachSaleInRange(start, end) { sale -> SalesCsv.writeSale(writer, sale) }
+                    }
+                }
+                snackbar.showSnackbar(l(lang, "CSV saved.", "CSV tersimpan."))
+            }
+        }
     }
 
     LaunchedEffect(Unit) { runTask { refresh() } }
@@ -291,7 +335,7 @@ private fun Tokopad() {
     }
 
     BackHandler(enabled = screen == "checkout" && cart.isNotEmpty()) { discardTarget = "dashboard" }
-    BackHandler(enabled = screen in listOf("customers", "settings")) { screen = "more" }
+    BackHandler(enabled = screen in listOf("customers", "settings", "debts")) { screen = "more" }
     BackHandler(enabled = screen == "products") { screen = "dashboard" }
     BackHandler(enabled = screen == "more" || screen == "history" || (screen == "checkout" && cart.isEmpty())) { screen = "dashboard" }
 
@@ -304,7 +348,7 @@ private fun Tokopad() {
                 Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).navigationBarsPadding().padding(horizontal = 8.dp, vertical = 6.dp)) {
                     listOf("dashboard" to l(lang, "Home", "Beranda"), "checkout" to l(lang, "Checkout", "Kasir"),
                         "products" to l(lang, "Products", "Produk"), "more" to l(lang, "More", "Lainnya")).forEach { (key, label) ->
-                        val selected = screen == key || (key == "more" && screen in listOf("history", "customers", "settings"))
+                        val selected = screen == key || (key == "more" && screen in listOf("history", "customers", "settings", "debts"))
                         val tint = if (selected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
                         Column(Modifier.weight(1f).background(if (selected) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent, RoundedCornerShape(8.dp))
                             .selectable(selected, enabled = !busy, role = Role.Tab, onClick = { navigate(key) }).testTag("nav-$key").padding(vertical = 8.dp),
@@ -331,6 +375,14 @@ private fun Tokopad() {
                 }
             }
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            if (loaded && screen == "dashboard" && backupDue) {
+                Surface(color = MaterialTheme.colorScheme.secondaryContainer, modifier = Modifier.fillMaxWidth().testTag("backup-reminder")) {
+                    Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(l(lang, "Back up your shop data regularly.", "Cadangkan data toko Anda secara berkala."), Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                        TextButton(enabled = !busy, onClick = { backupWarning = "export" }) { Text(l(lang, "Back up", "Cadangkan")) }
+                    }
+                }
+            }
             if (!loaded) {
                 Button(onClick = { runTask { refresh() } }, enabled = !busy, modifier = Modifier.padding(16.dp)) { Text(l(lang, "Load shop", "Muat toko")) }
             } else Box(Modifier.weight(1f)) {
@@ -354,7 +406,13 @@ private fun Tokopad() {
                             }
                         }, onRepeatDismiss = { repeatDraft = null })
                     "history" -> HistoryScreen(sales, lang, historyFrom, historyTo, query,
-                        onSearch = { query = it; runTask { refresh() } }, onRange = { a, b -> historyFrom = a; historyTo = b; runTask { refresh() } }, onSale = { selectSale(it) })
+                        onSearch = { query = it; runTask { refresh() } }, onRange = { a, b -> historyFrom = a; historyTo = b; runTask { refresh() } }, onSale = { selectSale(it) }, onExport = {
+                            val zone = java.time.ZoneId.systemDefault()
+                            csvFrom = java.time.LocalDate.ofEpochDay(historyFrom).atStartOfDay(zone).toInstant().toEpochMilli()
+                            csvTo = java.time.LocalDate.ofEpochDay(historyTo + 1).atStartOfDay(zone).toInstant().toEpochMilli()
+                            csvWarning = true
+                        })
+                    "debts" -> OutstandingDebtsScreen(outstandingSales, lang, onSale = { selectSale(it) })
                     "products" -> ProductsScreen(products, lang) { product, saved -> runTask { withContext(Dispatchers.IO) { store.saveProduct(product) }; saved(); refresh() } }
                     "customers" -> CustomersScreen(customers, lang,
                         onSave = { customer, saved -> runTask { withContext(Dispatchers.IO) { store.saveCustomer(customer) }; saved(); refresh() } },
@@ -426,9 +484,14 @@ private fun Tokopad() {
             if (action == "import") runTask { safetyBackup = withContext(Dispatchers.IO) { store.exportBackup() }; createBackup.launch("tokopad-before-restore-${System.currentTimeMillis()}.json") }
             else createBackup.launch("tokopad-${System.currentTimeMillis()}.json")
         }) { Text(l(lang, "Save backup", "Simpan cadangan")) } }, dismissButton = { TextButton(onClick = { backupWarning = null }) { Text(l(lang, "Cancel", "Batal")) } }) }
+    if (csvWarning) AlertDialog(onDismissRequest = { csvWarning = false; csvFrom = null; csvTo = null },
+        title = { Text(l(lang, "Sensitive CSV export", "Ekspor CSV berisi data sensitif")) },
+        text = { Text(l(lang, "This unencrypted file contains customer and transaction information. Keep it private. It includes all transactions by sale date in the selected range, including cancelled sales, regardless of search and without the 500-item limit. Tokens are not exported.", "File ini tidak dienkripsi dan berisi informasi pelanggan dan transaksi. Simpan secara pribadi. File mencakup semua transaksi berdasarkan tanggal penjualan dalam rentang terpilih, termasuk transaksi yang dibatalkan, tanpa mengikuti pencarian atau batas 500 transaksi. Token tidak diekspor.")) },
+        confirmButton = { TextButton(enabled = !busy, onClick = { csvWarning = false; createCsv.launch("tokopad-sales-${System.currentTimeMillis()}.csv") }) { Text(l(lang, "Export CSV", "Ekspor CSV")) } },
+        dismissButton = { TextButton(onClick = { csvWarning = false; csvFrom = null; csvTo = null }) { Text(l(lang, "Cancel", "Batal")) } })
     restoreText?.let { text -> AlertDialog(onDismissRequest = { restoreText = null }, title = { Text(l(lang, "Replace all data?", "Ganti semua data?")) },
         text = { Text(l(lang, "Current products, customers, transactions and settings will be replaced. Invalid backups are rejected before changing any data.", "Produk, pelanggan, transaksi, dan pengaturan saat ini akan diganti. Cadangan tidak valid ditolak sebelum data diubah.")) },
-        confirmButton = { TextButton(enabled = !busy, onClick = { restoreText = null; runTask { withContext(Dispatchers.IO) { store.restoreBackup(text) }; cart = emptyList(); repeatDraft = null; checkoutId = java.util.UUID.randomUUID().toString(); selectSale(null); query = ""; refresh(); snackbar.showSnackbar(l(settings.language, "Backup restored.", "Cadangan dipulihkan.")) } }) { Text(l(lang, "Replace data", "Ganti data")) } },
+        confirmButton = { TextButton(enabled = !busy, onClick = { restoreText = null; runTask { withContext(Dispatchers.IO) { store.restoreBackup(text) }; backupPreferences.edit().remove("last_backup").apply(); updateBackupReminder(); cart = emptyList(); repeatDraft = null; checkoutId = java.util.UUID.randomUUID().toString(); selectSale(null); query = ""; refresh(); snackbar.showSnackbar(l(settings.language, "Backup restored.", "Cadangan dipulihkan.")) } }) { Text(l(lang, "Replace data", "Ganti data")) } },
         dismissButton = { TextButton(onClick = { restoreText = null }) { Text(l(lang, "Cancel", "Batal")) } }) }
     customerHistory?.let { history -> AlertDialog(onDismissRequest = { customerHistory = null }, title = { Text(history.customer.name) },
         text = { LazyColumn(Modifier.heightIn(max = 450.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -478,12 +541,13 @@ private fun ShopMenu(language: String, shopName: String, onNavigate: (String) ->
             Triple("history", l(language, "History", "Riwayat"), l(language, "Transactions & receipts", "Transaksi & nota")),
             Triple("customers", l(language, "Customers", "Pelanggan"), l(language, "Profiles & purchase history", "Profil & riwayat belanja")),
             Triple("settings", l(language, "Settings", "Pengaturan"), l(language, "Receipts, printer & backups", "Nota, printer & cadangan")),
+            Triple("debts", l(language, "Outstanding debts", "Piutang belum lunas"), l(language, "All customers & dates", "Semua pelanggan & tanggal")),
         ).forEach { (key, title, subtitle) ->
             OutlinedCard(onClick = { onNavigate(key) }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp),
                 colors = CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.surface),
                 border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
                 Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    PadIcon(key, Modifier.size(20.dp))
+                    PadIcon(if (key == "debts") "receipt" else key, Modifier.size(20.dp))
                     Column(Modifier.weight(1f)) {
                         Text(title, style = MaterialTheme.typography.titleMedium)
                         Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -495,7 +559,7 @@ private fun ShopMenu(language: String, shopName: String, onNavigate: (String) ->
     }
 }
 
-private data class AppData(val settings: ShopSettings, val products: List<Product>, val customers: List<Customer>, val sales: List<Sale>, val dashboardSales: List<Sale>, val dashboard: Dashboard)
+private data class AppData(val settings: ShopSettings, val products: List<Product>, val customers: List<Customer>, val sales: List<Sale>, val dashboardSales: List<Sale>, val dashboard: Dashboard, val outstandingSales: List<Sale>)
 private data class CustomerHistory(val customer: Customer, val sales: List<Sale>, val outstanding: List<Sale>)
 
 internal fun operationError(error: Exception, language: String): String {
