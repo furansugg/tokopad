@@ -3,6 +3,7 @@ package com.tokopad.app
 import android.graphics.Bitmap
 import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.hasScrollToIndexAction
@@ -91,10 +92,63 @@ class CreditFlowTest {
     val compose = createAndroidComposeRule<MainActivity>()
 
     @Test
+    fun selectedDigitalBuyer_followsCartIntoDebt_andManualClearPersistsForPaidSale() {
+        waitForText("Overview")
+        val product = seededProducts.single { it.kind == ProductKind.DATA }
+        fun addRecipient() {
+            compose.onNodeWithTag("nav-checkout").performClick()
+            waitForText("Checkout")
+            screenTag("checkout-kind-DATA").performClick()
+            compose.onNodeWithText(product.name).performClick()
+            compose.onNodeWithTag("digital-buyer-${recipient.id}").performScrollTo().performClick()
+            compose.onNodeWithText("Add").assertIsEnabled().performClick()
+            compose.onNodeWithTag("checkout-cart").performClick()
+            screenTag("checkout-customer").assertTextContains(recipient.name)
+        }
+        fun finish() {
+            screenTag("checkout-review").assertIsEnabled().performClick()
+            compose.onNodeWithTag("checkout-complete").assertIsEnabled().performClick()
+            waitForText("Receipt")
+        }
+        addRecipient()
+        screenTag("checkout-credit").performClick()
+        compose.onNodeWithTag("checkout-customer-search").assertDoesNotExist()
+        screenshot("credit-automatic-cart-customer")
+        finish()
+        readStore { store ->
+            val sale = store.sales().first()
+            assertEquals(3, store.sales().size)
+            assertEquals(recipient.id, sale.customerId)
+            assertEquals(recipient.name, sale.customerName)
+            assertEquals(product.price, sale.balance)
+            assertEquals(0L, sale.paid)
+            assertEquals(listOf(sale), store.outstandingForCustomer(recipient.id))
+        }
+        compose.onNodeWithText("Close").performClick()
+        addRecipient()
+        screenTag("checkout-customer").performClick()
+        screenTag("checkout-clear-customer").performClick()
+        screenTag("checkout-customer").assertTextContains("Add customer (optional)")
+        screenTag("checkout-payment-noncash").performClick()
+        finish()
+        readStore { store ->
+            val sale = store.sales().first()
+            assertEquals(4, store.sales().size)
+            assertNull(sale.customerId)
+            assertEquals("", sale.customerName)
+            assertEquals(recipient.id, sale.lines.single().customerId)
+            assertTrue(store.salesForCustomer(recipient.id).any { it.id == sale.id })
+            assertEquals(seededProducts, store.products(true))
+            assertEquals(2, store.customers().size)
+            Store.validateBackup(store.exportBackup())
+        }
+    }
+
+    @Test
     fun customerDebt_settlesZeroAndPartialCredit_updatesReceiptDashboardAndBackup() {
         waitForText("Overview")
-        dashboardTag("dashboard-received").assertTextContains(money(0, "en"))
-        dashboardTag("dashboard-outstanding").assertTextContains(money(61_000, "en"))
+        screenTag("dashboard-received").assertTextContains(money(0, "en"))
+        screenTag("dashboard-outstanding").assertTextContains(money(61_000, "en"))
         readStore { store ->
             assertEquals(Dashboard(71_000, 2, 10_000, 61_000), store.dashboard(0, Long.MAX_VALUE))
             assertEquals(0L, zero.paid)
@@ -135,8 +189,8 @@ class CreditFlowTest {
         compose.onNodeWithText("Close").performClick()
         compose.onNodeWithTag("nav-dashboard").performClick()
         waitForText("Overview")
-        dashboardTag("dashboard-received").assertTextContains(money(61_000, "en"))
-        dashboardTag("dashboard-outstanding").assertTextContains(money(0, "en"))
+        screenTag("dashboard-received").assertTextContains(money(61_000, "en"))
+        screenTag("dashboard-outstanding").assertTextContains(money(0, "en"))
         screenshot("credit-dashboard-paid")
         readStore { store ->
             assertTrue(store.outstandingForCustomer(responsible.id).isEmpty())
@@ -196,7 +250,7 @@ class CreditFlowTest {
         compose.onNodeWithText("Close").performClick()
     }
 
-    private fun dashboardTag(tag: String): SemanticsNodeInteraction {
+    private fun screenTag(tag: String): SemanticsNodeInteraction {
         compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasTestTag(tag))
         return compose.onNodeWithTag(tag).performScrollTo()
     }

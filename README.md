@@ -25,7 +25,11 @@ The manual **Signed release** workflow additionally builds an AAB, using the `pr
 
 ### Customer debt
 
-In the cart, enable **Pay later (debt)**, select the saved customer responsible for payment, and enter the initial payment (zero for full debt, or less than the total for a partial payment). Choose cash/noncash for that payment. Create a customer in **More → Customers** first if necessary; a digital recipient is not automatically the debtor. Completing a debt sale records the sale and reduces stock immediately.
+When a saved buyer is selected for PLN or another digital item, that customer is automatically selected in the cart, including for debt. Multiple items for the same buyer and additional physical items keep that selection. You can change or clear the cart customer manually; that choice takes precedence. Different buyers or unsaved buyer details require an explicit cart customer for debt.
+
+Clearing the cart customer leaves a paid-in-full sale without a transaction-level customer; digital recipients are still saved on their items and remain linked to their purchase histories. Previously saved sales are unchanged.
+
+In the cart, enable **Pay later (debt)**, check the selected customer responsible for payment, and enter the initial payment (zero for full debt, or less than the total for a partial payment). Choose cash/noncash for that payment. Create a customer in **More → Customers** first if necessary. Completing a debt sale records the sale and reduces stock immediately.
 
 Open **More → Customers → Transactions**, select an outstanding transaction, and choose **Settle debt**. The next payment must cover the entire remaining balance: there are no further partial payments. Confirm the exact amount and cash/noncash method. Settlement records its date and method without creating another sale or changing stock. Repeated retries cannot record the same settlement twice. Receipts show initial payment, settlement when present, and balance; cancelled debts are void, with any money refunded separately.
 

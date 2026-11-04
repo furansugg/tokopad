@@ -247,9 +247,7 @@ class Store(context: Context) : java.io.Closeable {
                     line.copy(customerId = buyer.id)
                 }
             }
-            val customerSnapshot = manualBuyer ?: savedLines.firstOrNull {
-                it.product.kind != ProductKind.PHYSICAL && it.customerId != null
-            }?.customerId?.let { id -> buyers.first { it.id == id } }
+            val customerSnapshot = manualBuyer
             val sale = Sale(
                 id = 0, number = requestId, createdAt = System.currentTimeMillis(),
                 zoneId = ZoneId.systemDefault().id, lines = savedLines,

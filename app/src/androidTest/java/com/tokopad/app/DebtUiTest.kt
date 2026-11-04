@@ -147,15 +147,23 @@ class DebtUiTest {
         }
     }
 
-    @Test fun digitalBuyer_doesNotImplicitlySelectDebtCustomer() {
-        val digital = product.copy(kind = ProductKind.PULSA)
-        cart.value = listOf(CartLine(digital, destination = buyer.phone, buyerName = buyer.name, customerId = buyer.id))
+    @Test fun savedDigitalBuyer_automaticallySelectsDebtCustomer() {
+        val digital = product.copy(kind = ProductKind.ELECTRICITY)
+        cart.value = listOf(CartLine(digital, destination = buyer.meterNumber, kwh = "10", buyerName = buyer.name, customerId = buyer.id))
         showCheckout()
         checkoutTag("checkout-credit").performClick()
-        checkoutTag("checkout-customer-required").assertIsDisplayed()
-        checkoutTag("checkout-review").assertIsNotEnabled()
-        chooseBuyer()
-        checkoutTag("checkout-review").assertIsEnabled()
+        checkoutTag("checkout-customer").assertTextContains(buyer.name)
+        compose.onNodeWithTag("checkout-customer-required").assertDoesNotExist()
+        compose.onNodeWithTag("checkout-customer-search").assertDoesNotExist()
+        checkoutTag("checkout-paid").performTextReplacement("1000")
+        checkoutTag("checkout-review").assertIsEnabled().performClick()
+        compose.onNodeWithTag("checkout-confirm-customer").performScrollTo().assertTextContains("Customer: ${buyer.name}")
+        compose.onNodeWithTag("checkout-complete").performClick()
+        compose.runOnIdle {
+            assertEquals(buyer, completedCustomer)
+            assertEquals(1_000L, completedPaid)
+            assertEquals(true, completedCredit)
+        }
     }
 
     @Test fun customerSearch_showsUsefulPreview_andFindsNamePhoneOrMeter() {

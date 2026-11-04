@@ -102,6 +102,7 @@ Antarmuka minimalis, nyaman, informatif, dan memakai bahasa sehari-hari. Operasi
 - Tampilkan transaksi terkait pelanggan.
 - Penghapusan pelanggan melepaskan hubungan profil tanpa menghapus transaksi.
 - Pelanggan dengan sisa hutang tidak dapat dihapus sebelum hutang dilunasi atau transaksinya dibatalkan. Detail pelanggan menampilkan semua hutangnya, terpisah dari batas 500 transaksi terbaru dan bukan hutang penerima digital lain.
+- Pembeli tersimpan yang dipilih pada item digital otomatis terpilih di keranjang bila semua pembeli mengacu pada satu pelanggan yang sama; item fisik tidak mengganggu pilihan ini. Pilihan/pengosongan manual di keranjang tetap diprioritaskan. Jika pembeli berbeda atau belum tersimpan, penanggung jawab hutang wajib dipilih secara eksplisit.
 - Snapshot pelanggan pada transaksi lama tetap tersimpan; penghapusan profil bukan penghapusan seluruh data historis.
 
 ## 5. Nota

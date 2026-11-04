@@ -287,6 +287,7 @@ fun CheckoutScreen(products: List<Product>, customers: List<Customer>, cart: Lis
     var adding by rememberSaveable { mutableStateOf<Product?>(null) }
     var editing by rememberSaveable { mutableStateOf<Int?>(null) }
     var customer by rememberSaveable { mutableStateOf<Customer?>(null) }
+    var customerChosenManually by rememberSaveable { mutableStateOf(false) }
     var customerSearch by rememberSaveable { mutableStateOf("") }
     var discount by rememberSaveable { mutableStateOf("") }
     var payment by rememberSaveable { mutableStateOf("cash") }
@@ -300,7 +301,10 @@ fun CheckoutScreen(products: List<Product>, customers: List<Customer>, cart: Lis
     val subtotal = runCatching { cart.fold(0L) { sum, line -> Math.addExact(sum, Math.multiplyExact(line.product.price, line.quantity)) } }.getOrNull()
     val discountValue = if (discount.isBlank()) 0L else discount.toLongOrNull()
     val total = if (subtotal != null && discountValue != null && discountValue in 0..subtotal) subtotal - discountValue else null
-    val selectedCustomer = customers.firstOrNull { it.id == customer?.id }
+    val buyerIds = cart.filter { it.product.kind != ProductKind.PHYSICAL && (it.customerId != null || it.buyerName.isNotBlank()) }
+        .map { it.customerId }.distinct()
+    val selectedCustomerId = if (customerChosenManually) customer?.id else buyerIds.singleOrNull()
+    val selectedCustomer = customers.firstOrNull { it.id == selectedCustomerId }
     val paidValue = if (isCredit) (if (paid.isBlank()) 0L else paid.toLongOrNull()) else if (payment == "cash") paid.toLongOrNull() else total
     val validPayment = total != null && paidValue != null && (if (isCredit) total > 0 && paidValue >= 0 && paidValue < total && selectedCustomer != null else paidValue >= total)
     val canComplete = cart.isNotEmpty() && validPayment && !busy
@@ -403,7 +407,7 @@ fun CheckoutScreen(products: List<Product>, customers: List<Customer>, cart: Lis
                     }
                 }
                 item { Row(Modifier.fillMaxWidth().padding(top = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Checkbox(checked = isCredit, onCheckedChange = { isCredit = it; if (it) showCustomer = true }, enabled = !busy, modifier = Modifier.testTag("checkout-credit").semantics { contentDescription = l(language, "Pay later (debt)", "Bayar nanti (piutang)") })
+                    Checkbox(checked = isCredit, onCheckedChange = { isCredit = it; if (it && selectedCustomer == null) showCustomer = true }, enabled = !busy, modifier = Modifier.testTag("checkout-credit").semantics { contentDescription = l(language, "Pay later (debt)", "Bayar nanti (piutang)") })
                     Text(l(language, "Pay later (debt)", "Bayar nanti (piutang)"), Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, color = SalesInk)
                 } }
                 item { OutlinedButton(onClick = { showCustomer = !showCustomer }, enabled = !busy, modifier = Modifier.fillMaxWidth().padding(top = 8.dp).heightIn(min = 48.dp).testTag("checkout-customer"), shape = RoundedCornerShape(8.dp), border = BorderStroke(1.dp, SalesBorder), colors = ButtonDefaults.outlinedButtonColors(containerColor = SalesSurface, contentColor = SalesInk)) {
@@ -417,11 +421,11 @@ fun CheckoutScreen(products: List<Product>, customers: List<Customer>, cart: Lis
                     item { OutlinedTextField(customerSearch, { customerSearch = it }, Modifier.fillMaxWidth().padding(top = 8.dp).testTag("checkout-customer-search"), enabled = !busy, shape = RoundedCornerShape(8.dp), leadingIcon = { PadIcon("search", tint = SalesSecondary) }, label = { Text(if (isCredit) l(language, "Find saved customer (required)", "Cari pelanggan tersimpan (wajib)") else l(language, "Find customer (optional)", "Cari pelanggan (opsional)")) }, singleLine = true) }
                     val matches = customers.filter { it.name.contains(customerSearch.trim(), true) || it.phone.contains(customerSearch.trim(), true) || it.meterNumber.contains(customerSearch.trim(), true) }
                     items(matches.take(3), key = { "customer-${it.id}" }) { value ->
-                        TextButton(onClick = { customer = value; customerSearch = ""; showCustomer = false }, enabled = !busy, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("checkout-customer-${value.id}"), colors = ButtonDefaults.textButtonColors(contentColor = SalesInk)) { Text("${value.name} · ${value.phone.ifBlank { value.meterNumber }}", Modifier.fillMaxWidth()) }
+                        TextButton(onClick = { customer = value; customerChosenManually = true; customerSearch = ""; showCustomer = false }, enabled = !busy, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("checkout-customer-${value.id}"), colors = ButtonDefaults.textButtonColors(contentColor = SalesInk)) { Text("${value.name} · ${value.phone.ifBlank { value.meterNumber }}", Modifier.fillMaxWidth()) }
                     }
                     if (matches.size > 3) item { Text(l(language, "Showing 3 customers. Search by name, phone or meter number.", "Menampilkan 3 pelanggan. Cari nama, telepon, atau nomor meter."), Modifier.padding(top = 8.dp), color = SalesSecondary, style = MaterialTheme.typography.bodySmall) }
                     if (matches.isEmpty()) item { Text(if (customers.isEmpty()) l(language, "No saved customers. Add one in Customers first.", "Belum ada pelanggan tersimpan. Tambahkan di menu Pelanggan.") else l(language, "No matching customers. Try another search.", "Pelanggan tidak ditemukan. Coba pencarian lain."), Modifier.padding(top = 8.dp), color = SalesSecondary, style = MaterialTheme.typography.bodySmall) }
-                    item { TextButton(onClick = { customer = null; showCustomer = false }, enabled = !busy, modifier = Modifier.heightIn(min = 48.dp).testTag("checkout-clear-customer"), colors = ButtonDefaults.textButtonColors(contentColor = SalesSecondary)) { Text(if (isCredit) l(language, "Clear customer", "Hapus pilihan pelanggan") else l(language, "Walk-in customer", "Pelanggan umum")) } }
+                    item { TextButton(onClick = { customer = null; customerChosenManually = true; showCustomer = false }, enabled = !busy, modifier = Modifier.heightIn(min = 48.dp).testTag("checkout-clear-customer"), colors = ButtonDefaults.textButtonColors(contentColor = SalesSecondary)) { Text(if (isCredit) l(language, "Clear customer", "Hapus pilihan pelanggan") else l(language, "Walk-in customer", "Pelanggan umum")) } }
                 }
                 item {
                     Surface(Modifier.fillMaxWidth().padding(top = 16.dp), shape = RoundedCornerShape(10.dp), color = SalesSurface, contentColor = SalesInk, border = BorderStroke(1.dp, SalesBorder)) {

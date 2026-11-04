@@ -119,7 +119,7 @@ class StoreTest {
         assertEquals("Alice", buyer.name)
         assertEquals("00123456", buyer.meterNumber)
         assertEquals("", buyer.phone)
-        assertEquals(buyer.id, sale.customerId)
+        assertNull(sale.customerId)
         assertTrue(sale.lines.all { it.customerId == buyer.id })
         assertEquals(sale, store.checkout(listOf(line, line), null, 0, "cash", 200, request))
         rejected { store.checkout(listOf(line.copy(buyerName = "Bob"), line), null, 0, "cash", 200, request) }
@@ -131,6 +131,82 @@ class StoreTest {
         assertEquals(store.sale(sale.id), store.checkout(listOf(line, line), null, 0, "cash", 200, request))
         assertEquals(1, store.customers().size)
         assertEquals(listOf(store.sale(sale.id)), store.sales(query = sale.receiptNumber))
+    }
+
+    @Test fun clearedCustomerKeepsSavedPlnRecipientsLinkedWithoutPromotingFirstBuyer() {
+        val product = digital().copy(trackStock = true, stock = 10).also { store.saveProduct(it) }
+        val buyers = listOf("Alice" to "00123456", "Bob" to "00987654").map { (name, meter) ->
+            Customer(name = name, meterNumber = meter).let { it.copy(id = store.saveCustomer(it)) }
+        }
+        val lines = buyers.map { CartLine(product, destination = it.meterNumber, buyerName = it.name, kwh = "1", customerId = it.id) }
+        for (payment in listOf("cash", "noncash")) {
+            for (basket in listOf(lines.take(1), lines)) {
+                val request = UUID.randomUUID().toString()
+                val paid = product.price * basket.size
+                val sale = store.checkout(basket, null, 0, payment, paid, request)
+                assertNull(sale.customerId)
+                assertEquals("", sale.customerName)
+                assertEquals("", sale.customerPhone)
+                assertEquals(basket.map { it.customerId }, sale.lines.map { it.customerId })
+                val backup = store.exportBackup()
+                store.restoreBackup(backup)
+                assertEquals(sale, store.checkout(basket, null, 0, payment, paid, request))
+                for (line in basket) assertTrue(store.salesForCustomer(line.customerId!!).contains(sale))
+                assertEquals(backup, store.exportBackup())
+            }
+        }
+        assertEquals(4, store.sales().size)
+        assertEquals(2, store.customers().size)
+        assertEquals(4L, store.products().single().stock)
+    }
+
+    @Test fun explicitAlternateCustomerRemainsPayerAndNullCustomerCannotCreateDebt() {
+        val product = digital()
+        val buyer = Customer(name = "Recipient", meterNumber = "00123456").let { it.copy(id = store.saveCustomer(it)) }
+        val payer = Customer(name = "Payer", phone = "08111111").let { it.copy(id = store.saveCustomer(it)) }
+        val lines = listOf(CartLine(product, destination = buyer.meterNumber, buyerName = buyer.name, kwh = "1", customerId = buyer.id))
+        val before = store.exportBackup()
+        rejected { store.checkout(lines, null, 0, "cash", 0, isCredit = true) }
+        assertEquals(before, store.exportBackup())
+        for (credit in listOf(false, true)) {
+            val sale = store.checkout(lines, payer, 0, "noncash", if (credit) 25 else 100, isCredit = credit)
+            assertEquals(payer.id, sale.customerId)
+            assertEquals(payer.name, sale.customerName)
+            assertEquals(payer.phone, sale.customerPhone)
+            assertEquals(buyer.id, sale.lines.single().customerId)
+            for (customer in listOf(buyer, payer)) assertTrue(store.salesForCustomer(customer.id).contains(sale))
+            if (credit) assertEquals(listOf(sale), store.outstandingForCustomer(payer.id))
+        }
+        assertTrue(store.outstandingForCustomer(buyer.id).isEmpty())
+        assertEquals(2, store.customers().size)
+    }
+
+    @Test fun legacyInferredCustomerSnapshotSurvivesNullCustomerRetryAfterRestore() {
+        val product = digital().copy(trackStock = true, stock = 5).also { store.saveProduct(it) }
+        val buyer = Customer(name = "Alice", phone = "08111111", meterNumber = "00123456")
+            .let { it.copy(id = store.saveCustomer(it)) }
+        val lines = listOf(CartLine(product, destination = buyer.meterNumber, buyerName = buyer.name, kwh = "1", customerId = buyer.id))
+        val request = UUID.randomUUID().toString()
+        val sale = store.checkout(lines, null, 0, "cash", 100, request)
+        val legacySnapshot = sale.copy(customerId = buyer.id, customerName = buyer.name, customerPhone = buyer.phone)
+        val legacy = editedBackup { data ->
+            // Old releases inferred this snapshot while signing the original null-customer request.
+            val saved = data.getJSONArray("sales").getJSONObject(0)
+            assertTrue(saved.getString("checkoutSignature").isNotBlank())
+            saved.put("customerId", buyer.id).put("customerName", buyer.name).put("customerPhone", buyer.phone)
+        }
+        store.restoreBackup(legacy)
+        assertEquals(legacySnapshot, store.sale(sale.id))
+        assertEquals(legacySnapshot, store.checkout(lines, null, 0, "cash", 100, request))
+        store.restoreBackup(store.exportBackup())
+        val restored = store.exportBackup()
+        assertEquals(legacySnapshot, store.checkout(lines, null, 0, "cash", 100, request))
+        rejected { store.checkout(lines, buyer, 0, "cash", 100, request) }
+        assertEquals(listOf(legacySnapshot), store.salesForCustomer(buyer.id))
+        assertEquals(1, store.sales().size)
+        assertEquals(1, store.customers().size)
+        assertEquals(4L, store.products().single().stock)
+        assertEquals(restored, store.exportBackup())
     }
 
     @Test fun selectedBuyerEditsNeverOverwriteProfilesAndAutofillSurvivesReopen() {
@@ -236,7 +312,8 @@ class StoreTest {
             CartLine(product, destination = "08111111", buyerName = "Alice"),
             CartLine(product, destination = "08222222", buyerName = "Bob"),
         )
-        val implicit = store.checkout(lines, null, 0, "cash", 200)
+        // Recreate the transaction-level buyer snapshot that old releases inferred from the first line.
+        val implicit = store.checkout(lines, Customer(name = "Alice", phone = "08111111"), 0, "cash", 200)
         val explicit = store.checkout(lines, Customer(name = "Payer"), 0, "cash", 200)
         val deleted = implicit.lines[0].customerId!!
         val remaining = implicit.lines[1].customerId!!
