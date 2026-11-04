@@ -1,6 +1,7 @@
 package com.tokopad.app
 
-import android.view.KeyEvent
+import android.content.Context
+import android.view.inputmethod.InputMethodManager
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.hasAnyAncestor
@@ -171,7 +172,11 @@ class HistoryDateRangeTest {
     }
 
     private fun dismissKeyboard() {
-        InstrumentationRegistry.getInstrumentation().sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
+        compose.runOnUiThread {
+            val activity = compose.activity
+            val input = activity.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+            input.hideSoftInputFromWindow(activity.window.decorView.windowToken, 0)
+        }
     }
 
     private fun waitUntilNotBusy() {
