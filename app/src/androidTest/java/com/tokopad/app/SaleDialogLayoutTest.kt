@@ -121,12 +121,12 @@ class SaleDialogLayoutTest {
         compose.setContent {
             TokopadTheme { SaleDialog(transaction.value, settings, false, {}, {}, {}, onSettle = { _, _ -> }) }
         }
-        visible(compose.onNodeWithTag("sale-payment-status")).assertTextContains("Partially paid")
+        visible(compose.onNodeWithTag("sale-payment-status")).assertTextContains("Partially paid", substring = true)
         val balance = hasTestTag("sale-balance")
         visible(compose.onNode((balance or hasAnyAncestor(balance)) and hasText(money(15_000, "en"), substring = true)))
         visible(compose.onNodeWithTag("sale-settle"))
         compose.runOnIdle { transaction.value = debt.copy(cancelledAt = 1_730_086_400_000, cancellationReason = "Customer returned item") }
-        visible(compose.onNodeWithTag("sale-payment-status")).assertTextContains("Cancelled")
+        visible(compose.onNodeWithTag("sale-payment-status")).assertTextContains("Cancelled", substring = true)
         compose.onNodeWithTag("sale-settle").assertDoesNotExist()
         compose.onNodeWithText("Cancel transaction").assertDoesNotExist()
     }

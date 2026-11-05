@@ -97,6 +97,11 @@ class HistoryDateRangeTest {
         compose.onNodeWithText("Receipt or customer name").performTextReplacement(olderSale.receiptNumber)
         compose.onNodeWithText("Search").performClick()
         dismissKeyboard()
+        compose.waitUntil(timeoutMillis = 15_000) {
+            compose.onAllNodesWithText("Working…").fetchSemanticsNodes().isEmpty() &&
+                compose.onAllNodesWithText("Sedang diproses…").fetchSemanticsNodes().isEmpty()
+        }
+        compose.onNode(hasScrollToIndexAction()).performScrollToIndex(3)
         waitForText("No matching transactions")
 
         compose.onNodeWithTag("nav-dashboard").performClick()
