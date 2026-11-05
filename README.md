@@ -43,6 +43,8 @@ Digital sales are manual records, not automatic provider fulfillment. Noncash pa
 
 Printed receipts use short `TP-00000001` transaction numbers, not the internal checkout UUID. PLN-only receipts use centered shop branding/title, aligned buyer/meter/kWh/product fields, `=` section rules, a bold enlarged token grouped four digits at a time, charged line amount, total/payment, and a centered footer. A change row appears only when needed; subtotal/discount appear when applicable. Mixed baskets retain per-product details. Header/logo/footer are sale snapshots: changing branding affects new sales, not historical reprints. ESC/POS raster-logo and enlarged-text support depends on the printer. Printing allows a short connection warm-up and output drain before closing; this is a compatibility measure, not proof that a particular printer physically printed.
 
+The on-screen receipt uses a responsive card layout with a highlighted PLN token. It is a screen-oriented presentation and may differ from the printed receipt; printer formatting is unchanged.
+
 ## Interface
 
 Launcher and header use a lightweight vector interpretation of the supplied Tokopad mark, including adaptive/themed launcher support. Settings tabs fill the available width at normal text sizes and remain scrollable with larger fonts. Theme and language choices both use accessible radio selection.

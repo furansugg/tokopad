@@ -32,7 +32,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.Role
@@ -234,45 +233,26 @@ fun SaleDialog(sale: Sale, settings: ShopSettings, busy: Boolean, onDismiss: () 
     }
     AlertDialog(onDismissRequest = { if (!busy) onDismiss() }, modifier = Modifier.imePadding(), containerColor = SalesSurface, shape = RoundedCornerShape(10.dp), title = { Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(l(language, "Receipt", "Nota"), color = SalesInk)
-        Text(sale.receiptNumber, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
     } },
         text = { Column(Modifier.heightIn(max = 500.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(l(language, "Payment status: ", "Status pembayaran: ") + paymentStatus(sale, language), Modifier.testTag("sale-payment-status"), style = MaterialTheme.typography.labelMedium, color = SalesSecondary)
+            SaleReceiptCard(sale, settings)
+            Text(l(language, "The printed receipt layout may differ.", "Tampilan struk cetak dapat berbeda."), style = MaterialTheme.typography.bodySmall, color = SalesSecondary)
             if (sale.isCredit) {
-                Text(l(language, "Payment status: ", "Status pembayaran: ") + paymentStatus(sale, language), Modifier.testTag("sale-payment-status"), fontWeight = FontWeight.SemiBold)
                 Text(sale.customerName)
+                Text(l(language, "Initial method: ", "Metode awal: ") + (if (sale.payment == "cash") l(language, "Cash", "Tunai") else l(language, "Noncash", "Nontunai")))
                 Text(l(language, "Initial payment: ", "Pembayaran awal: ") + money(sale.paid, language))
+                Text(l(language, "Paid total: ", "Total dibayar: ") + money(sale.received, language))
                 Text(l(language, "Remaining: ", "Sisa: ") + money(sale.balance, language), Modifier.testTag("sale-balance"))
                 sale.settlement?.let { settlement ->
                     val date = DateTimeFormatter.ofPattern("d MMM yyyy · HH:mm", Locale.forLanguageTag(language)).withZone(ZoneId.of(sale.zoneId)).format(Instant.ofEpochMilli(settlement.createdAt))
                     Text(l(language, "Final settlement: ", "Pelunasan akhir: ") + money(settlement.amount, language) + "\n" + date + " · " + (if (settlement.payment == "cash") l(language, "Cash", "Tunai") else l(language, "Noncash", "Nontunai")), Modifier.testTag("sale-settlement"))
                 }
+                if (sale.cancelledAt != null) Text(l(language, "Refunds handled manually", "Pengembalian dana manual"))
                 if (canSettle && !cancelling) Button(onClick = { settling = true }, enabled = !busy, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("sale-settle")) { Text(l(language, "Settle debt", "Lunasi piutang")) }
             }
             if (sale.lines.size == 1 && sale.lines[0].product.kind == ProductKind.ELECTRICITY && sale.lines[0].quantity == 1L) {
                 TextButton(onClick = onBuyAgain, enabled = !busy, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("sale-buy-again")) { Text(l(language, "Buy again", "Beli lagi")) }
-            }
-            // Physical receipt paper deliberately stays white in either theme.
-            Surface(shape = RoundedCornerShape(8.dp), color = Color.White, contentColor = Color.Black, border = BorderStroke(1.dp, SalesBorder)) {
-                BoxWithConstraints(Modifier.fillMaxWidth().padding(12.dp)) {
-                    val columns = if (settings.paperWidth == 80) 48 else 32
-                    val textSize = minOf(12f, maxWidth.value / LocalDensity.current.fontScale / (columns * 0.62f))
-                    Column(Modifier.fillMaxWidth()) {
-                    Receipt.blocks(sale, settings).forEach { block ->
-                        val bitmap = remember(block.logo) {
-                            if (block.logo.isBlank()) null else runCatching {
-                                val bytes = Base64.decode(block.logo.orEmpty().substringAfter("base64,"), Base64.DEFAULT)
-                                BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
-                            }.getOrNull()
-                        }
-                        if (bitmap != null) Image(bitmap, l(language, "Shop logo", "Logo toko"), Modifier.align(Alignment.CenterHorizontally).sizeIn(maxWidth = 160.dp, maxHeight = 100.dp))
-                        if (block.text.isNotEmpty()) Text(block.text, Modifier.fillMaxWidth(), fontFamily = FontFamily.Monospace,
-                            fontSize = (if (block.large) textSize * 2 else textSize).sp,
-                            lineHeight = (if (block.large) textSize * 2.5f else textSize * 1.5f).sp,
-                            fontWeight = if (block.emphasis || block.large) FontWeight.Bold else FontWeight.Normal,
-                            textAlign = if (block.centered) TextAlign.Center else TextAlign.Start, color = Color.Black)
-                    }
-                    }
-                }
             }
             if (sale.cancelledAt == null) {
                 if (!cancelling) TextButton(onClick = { cancelling = true }, enabled = !busy, modifier = Modifier.heightIn(min = 48.dp)) { Text(l(language, "Cancel transaction", "Batalkan transaksi")) }
@@ -287,6 +267,86 @@ fun SaleDialog(sale: Sale, settings: ShopSettings, busy: Boolean, onDismiss: () 
         } },
         confirmButton = { TextButton(onClick = onPrint, enabled = !busy, modifier = Modifier.heightIn(min = 48.dp)) { Text(l(language, "Print", "Cetak")) } },
         dismissButton = { TextButton(onClick = onDismiss, enabled = !busy, modifier = Modifier.heightIn(min = 48.dp)) { Text(l(language, "Close", "Tutup")) } })
+}
+
+@Composable
+private fun SaleReceiptCard(sale: Sale, settings: ShopSettings) {
+    val language = settings.language
+    val shop = sale.shop
+    val electricityOnly = sale.lines.isNotEmpty() && sale.lines.all { it.product.kind == ProductKind.ELECTRICITY }
+    val date = DateTimeFormatter.ofPattern("dd MMM yyyy · HH:mm", Locale.forLanguageTag(language)).withZone(ZoneId.of(sale.zoneId))
+    val logo = remember(shop.logo) {
+        if (shop.logo.isBlank()) null else runCatching {
+            val bytes = Base64.decode(shop.logo.substringAfter("base64,"), Base64.DEFAULT)
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+        }.getOrNull()
+    }
+    Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), color = SalesSurface, contentColor = SalesInk, border = BorderStroke(1.dp, SalesBorder)) {
+        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                if (shop.headerMode != "name" && logo != null) Image(logo, l(language, "Shop logo", "Logo toko"), Modifier.sizeIn(maxWidth = 160.dp, maxHeight = 100.dp))
+                if (shop.headerMode != "logo" && shop.shopName.isNotBlank()) Text(shop.shopName, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+                listOf(shop.address, shop.contact, shop.header).filter { it.isNotBlank() }.forEach {
+                    Text(it, style = MaterialTheme.typography.bodySmall, color = SalesSecondary, textAlign = TextAlign.Center)
+                }
+            }
+            HorizontalDivider(color = SalesBorder)
+            ReceiptDetail(l(language, "Receipt number", "Nomor nota"), sale.receiptNumber)
+            ReceiptDetail(l(language, "Date", "Tanggal"), date.format(Instant.ofEpochMilli(sale.createdAt)))
+            if (shop.cashier.isNotBlank()) ReceiptDetail(l(language, "Cashier", "Kasir"), shop.cashier)
+            if ((sale.isCredit || (settings.showCustomer && !electricityOnly)) && sale.customerName.isNotBlank()) ReceiptDetail(if (sale.isCredit) l(language, "Responsible customer", "Penanggung jawab") else l(language, "Customer", "Pelanggan"), sale.customerName)
+            if ((sale.isCredit || (settings.showCustomer && !electricityOnly)) && sale.customerPhone.isNotBlank()) ReceiptDetail(l(language, "Phone", "Telepon"), sale.customerPhone)
+            if (sale.cancelledAt != null) ReceiptDetail(l(language, "Cancelled", "Dibatalkan"), date.format(Instant.ofEpochMilli(sale.cancelledAt)))
+            HorizontalDivider(color = SalesBorder)
+            sale.lines.forEachIndexed { index, line ->
+                if (index > 0) HorizontalDivider(color = SalesBorder)
+                Text(line.product.name, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                val buyer = if (electricityOnly) line.buyerName.ifBlank { sale.customerName } else line.buyerName
+                if (line.product.kind != ProductKind.PHYSICAL && buyer.isNotBlank()) ReceiptDetail(l(language, "Buyer", "Pembeli"), buyer)
+                if (line.destination.isNotBlank()) ReceiptDetail(if (line.product.kind == ProductKind.ELECTRICITY) l(language, "Meter / customer ID", "Meter / ID pelanggan") else l(language, "Destination", "Tujuan"), line.destination)
+                if (line.kwh.isNotBlank()) ReceiptDetail("kWh", line.kwh)
+                if (line.product.provider.isNotBlank() && line.product.kind != ProductKind.ELECTRICITY) ReceiptDetail(l(language, "Provider", "Penyedia"), line.product.provider)
+                if (line.product.packageName.isNotBlank() && line.product.kind != ProductKind.ELECTRICITY) ReceiptDetail(l(language, "Package", "Paket"), line.product.packageName)
+                if (line.product.nominal > 0 && line.product.kind != ProductKind.PHYSICAL && (line.product.kind != ProductKind.ELECTRICITY || sale.lines.any { it.product.kind != ProductKind.ELECTRICITY })) ReceiptDetail(l(language, "Nominal", "Nominal"), money(line.product.nominal, language))
+                if (line.note.isNotBlank()) ReceiptDetail(l(language, "Note", "Catatan"), line.note)
+                if (line.code.isNotBlank()) {
+                    if (line.product.kind == ProductKind.ELECTRICITY) {
+                        val digits = line.code.filter { it in '0'..'9' }
+                        val token = if (digits.isNotEmpty() && line.code.all { it in '0'..'9' || it == ' ' || it == '-' }) digits.chunked(4).joinToString(" ") else line.code
+                        Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), color = SalesMuted, contentColor = SalesInk) {
+                            Column(Modifier.padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(l(language, "TOKEN / STROOM NUMBER", "NOMOR TOKEN / STROOM"), style = MaterialTheme.typography.labelMedium, color = SalesSecondary, textAlign = TextAlign.Center)
+                                Text(token, Modifier.fillMaxWidth(), style = MaterialTheme.typography.titleLarge, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+                            }
+                        }
+                    } else ReceiptDetail(l(language, "Code", "Kode"), line.code)
+                }
+                ReceiptDetail("${line.quantity}${if (line.product.kind == ProductKind.PHYSICAL && line.product.unit.isNotBlank()) " ${line.product.unit}" else ""} × ${money(line.product.price, language)}", money(Math.multiplyExact(line.quantity, line.product.price), language))
+            }
+            HorizontalDivider(color = SalesBorder)
+            if (!electricityOnly || (settings.showDiscount && sale.discount > 0)) ReceiptDetail(l(language, "Subtotal", "Subtotal"), money(sale.subtotal, language))
+            if (settings.showDiscount && sale.discount > 0) ReceiptDetail(l(language, "Discount", "Diskon"), "-${money(sale.discount, language)}")
+            Text(l(language, "Total", "Total"), style = MaterialTheme.typography.labelLarge, color = SalesSecondary)
+            Text(money(sale.total, language), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+            if (!sale.isCredit) {
+                ReceiptDetail(l(language, "Payment", "Pembayaran"), if (sale.payment == "cash") l(language, "Cash", "Tunai") else l(language, "Noncash", "Nontunai"))
+                ReceiptDetail(l(language, "Paid", "Dibayar"), money(sale.paid, language))
+                if (sale.paid != sale.total) ReceiptDetail(l(language, "Change", "Kembalian"), money(sale.paid - sale.total, language))
+            }
+            if (shop.footer.isNotBlank()) {
+                HorizontalDivider(color = SalesBorder)
+                Text(shop.footer, Modifier.fillMaxWidth(), style = MaterialTheme.typography.bodySmall, color = SalesSecondary, textAlign = TextAlign.Center)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ReceiptDetail(label: String, value: String) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text(label, Modifier.weight(1f), style = MaterialTheme.typography.labelMedium, color = SalesSecondary)
+        Text(value, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, color = SalesInk, textAlign = TextAlign.End)
+    }
 }
 
 private fun checkoutKinds(language: String) = listOf(
