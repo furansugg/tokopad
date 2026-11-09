@@ -36,14 +36,16 @@ class ReceiptQrSettingsUiTest {
         val field = compose.onNodeWithTag("receipt-qr-content")
         val limit = "é".repeat(100)
         val tooLong = limit + "é"
-        field.performScrollTo().performTextInput(tooLong).assertTextContains(tooLong)
+        field.performScrollTo().performTextInput(tooLong)
+        field.assertTextContains(tooLong)
         compose.onNodeWithText("Maximum 200 UTF-8 bytes.").assertExists()
         compose.onNodeWithText("Save settings").assertIsNotEnabled()
         compose.onNodeWithTag("settings-general").performClick()
-        compose.onNodeWithText("QR text or URL exceeds 200 UTF-8 bytes. Check Receipt settings.").assertExists()
+        compose.onNodeWithText("Check the QR text or URL in Receipt settings.").assertExists()
         compose.onNodeWithText("Save settings").assertIsNotEnabled()
         compose.onNodeWithTag("settings-receipt").performClick()
-        field.performScrollTo().assertTextContains(tooLong).performTextClearance().performTextInput(limit)
+        field.performScrollTo().assertTextContains(tooLong).performTextClearance()
+        field.performTextInput(limit)
         compose.onNodeWithText("Save settings").assertIsEnabled().performClick()
         compose.runOnIdle { assertEquals(limit, settings.value.qrContent) }
 
