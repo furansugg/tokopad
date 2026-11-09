@@ -399,8 +399,8 @@ class ReceiptTest {
                 val header = prefix.size + start.size - 4
                 val stride = (bytes[header + 4].toInt() and 255) or ((bytes[header + 5].toInt() and 255) shl 8)
                 val height = (bytes[header + 6].toInt() and 255) or ((bytes[header + 7].toInt() and 255) shl 8)
-                assertTrue(stride * 8 <= 256)
-                assertTrue(height <= 256)
+                assertTrue(stride * 8 <= 224)
+                assertTrue(height <= 224)
                 val matrix = Encoder.encode(payload, ErrorCorrectionLevel.M, mapOf(EncodeHintType.CHARACTER_SET to "UTF-8")).matrix
                 val scale = height / (matrix.height + 8)
                 assertTrue(scale >= 3)

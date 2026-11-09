@@ -280,7 +280,7 @@ object Receipt {
     private fun qrRaster(content: String): ByteArray {
         val matrix = Encoder.encode(content, ErrorCorrectionLevel.M, mapOf(EncodeHintType.CHARACTER_SET to "UTF-8")).matrix
         val modules = matrix.width + 8
-        val scale = 256 / modules
+        val scale = 224 / modules
         require(scale >= 3) { "Receipt QR exceeds supported size" }
         val size = modules * scale
         val stride = (size + 7) / 8
