@@ -602,6 +602,8 @@ fun SettingsScreen(
     val scope = rememberCoroutineScope()
     val logoBitmap = rememberManagementLogo(draft.logo)
     val logoRequired = draft.headerMode in listOf("logo", "both") && logoBitmap == null
+    val qrTooLong = draft.qrContent.toByteArray(Charsets.UTF_8).size > Store.MAX_QR_CONTENT_BYTES
+    val qrHasControl = draft.qrContent.any { it.isISOControl() }
     val logoPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri == null) logoLoading = false
         else {
@@ -744,6 +746,18 @@ fun SettingsScreen(
                             l(language, "Receipt header", "Teks pembuka nota"), multiline = true)
                         ManagementField(draft.footer, { draft = draft.copy(footer = it) },
                             l(language, "Receipt footer", "Teks penutup nota"), multiline = true)
+                        Text(l(language,
+                            "Enter text or a URL to print a QR code at the receipt footer. Leave empty to disable. Anyone scanning it can read the content. Existing receipts keep their original content.",
+                            "Masukkan teks atau URL untuk mencetak kode QR di bagian bawah nota. Kosongkan untuk menonaktifkan. Siapa pun yang memindai dapat membaca isinya. Nota lama menyimpan isi aslinya."),
+                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        ManagementField(draft.qrContent, { draft = draft.copy(qrContent = it) },
+                            l(language, "QR text or URL", "Teks atau URL QR"),
+                            error = when {
+                                qrTooLong -> l(language, "Maximum 200 UTF-8 bytes.", "Maksimal 200 byte UTF-8.")
+                                qrHasControl -> l(language, "Control characters are not allowed.", "Karakter kontrol tidak diperbolehkan.")
+                                else -> null
+                            },
+                            modifier = Modifier.testTag("receipt-qr-content"))
                         Column {
                             ManagementToggle(l(language, "Show customer on receipts", "Tampilkan pelanggan di nota"), draft.showCustomer) {
                                 draft = draft.copy(showCustomer = it)
@@ -840,10 +854,13 @@ fun SettingsScreen(
         if (currentSection == "general" || currentSection == "receipt") {
             if (logoRequired) Text(l(language, "Choose a logo or select Shop name before saving.",
                 "Pilih logo atau pilih Nama toko sebelum menyimpan."), color = MaterialTheme.colorScheme.error)
+            if ((qrTooLong || qrHasControl) && currentSection != "receipt") Text(l(language,
+                "Check the QR text or URL in Receipt settings.",
+                "Periksa teks atau URL QR di pengaturan Nota."), color = MaterialTheme.colorScheme.error)
             Button(onClick = {
                 attempted = true
                 if (draft.shopName.isBlank()) onSection("general")
-                else if (!logoLoading && !logoRequired) {
+                else if (!logoLoading && !logoRequired && !qrTooLong && !qrHasControl) {
                     draft = draft.copy(
                         shopName = draft.shopName.trim(), address = draft.address.trim(), contact = draft.contact.trim(),
                         header = draft.header.trim(), footer = draft.footer.trim(), cashier = draft.cashier.trim(),
@@ -851,7 +868,7 @@ fun SettingsScreen(
                     )
                     onSave(draft)
                 }
-            }, enabled = !logoLoading && !logoRequired,
+            }, enabled = !logoLoading && !logoRequired && !qrTooLong && !qrHasControl,
                 modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp), shape = RoundedCornerShape(8.dp)) {
                 Text(l(language, "Save settings", "Simpan pengaturan"))
             }

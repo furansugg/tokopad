@@ -51,10 +51,38 @@ class StoreValidationTest {
     @Test fun rejectsTamperingAndUnsupportedVersion() {
         val envelope = JSONObject(backup(data())).put("sha256", "0".repeat(64))
         assertThrows(IllegalArgumentException::class.java) { Store.validateBackup(envelope.toString()) }
-        val unsupported = JSONObject(backup(data())).put("version", 3)
+        val unsupported = JSONObject(backup(data())).put("version", 4)
         assertThrows(IllegalArgumentException::class.java) { Store.validateBackup(unsupported.toString()) }
         assertThrows(IllegalArgumentException::class.java) { Store.validateBackup("not json") }
         assertThrows(IllegalArgumentException::class.java) { Store.validateBackup("[".repeat(1000) + "]".repeat(1000)) }
+    }
+
+    @Test fun qrContentIsOptionalStrictlyTypedAndLimitedInSettingsAndSnapshots() {
+        for (version in 1..3) Store.validateBackup(backup(data(), version))
+        val valid = data()
+        valid.getJSONObject("settings").put("qrContent", "é".repeat(100))
+        valid.getJSONArray("sales").getJSONObject(0).getJSONObject("shop").put("qrContent", "x".repeat(200))
+        Store.validateBackup(backup(valid, 3))
+        valid.getJSONObject("settings").put("qrContent", "😀".repeat(50))
+        Store.validateBackup(backup(valid, 3))
+        for (bad in listOf<Any>("x".repeat(201), "é".repeat(101), "😀".repeat(51), "bad\ncontent",
+            "\uD800", "\uDC00", "\uD800x", "x\uDC00", "\uDC00\uD800", 1, true, JSONObject.NULL)) {
+            rejects(data().also { it.getJSONObject("settings").put("qrContent", bad) }, 3)
+            rejects(data().also { it.getJSONArray("sales").getJSONObject(0).getJSONObject("shop").put("qrContent", bad) }, 3)
+        }
+    }
+
+    @Test fun escapedUnpairedSurrogatesInBackupAreRejected() {
+        for (snapshot in listOf(false, true)) for (escaped in listOf("\\ud800", "\\udc00", "\\ud800x")) {
+            val data = data()
+            val settings = if (snapshot) data.getJSONArray("sales").getJSONObject(0).getJSONObject("shop") else data.getJSONObject("settings")
+            settings.put("qrContent", "SURROGATE_MARKER")
+            val payload = data.toString().replace("SURROGATE_MARKER", escaped)
+            val checksum = MessageDigest.getInstance("SHA-256").digest(payload.toByteArray(Charsets.UTF_8))
+                .joinToString("") { "%02x".format(it.toInt() and 255) }
+            val envelope = JSONObject().put("version", 3).put("sha256", checksum).put("payload", payload).toString()
+            assertThrows(IllegalArgumentException::class.java) { Store.validateBackup(envelope) }
+        }
     }
 
     @Test fun backupLimitUsesUtf8BytesNotCharacterCount() {

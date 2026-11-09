@@ -18,6 +18,9 @@ import android.os.LocaleList
 import android.text.Layout
 import android.text.StaticLayout
 import android.text.TextPaint
+import com.google.zxing.EncodeHintType
+import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
+import com.google.zxing.qrcode.encoder.Encoder
 import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.text.NumberFormat
@@ -266,8 +269,32 @@ object Receipt {
             }
             write(0x0a)
         }
+        if (sale.shop.qrContent.isNotEmpty()) {
+            write(byteArrayOf(0x1b, 0x61, 0x01, 0x1b, 0x45, 0x00, 0x1d, 0x21, 0x00))
+            write(qrRaster(sale.shop.qrContent))
+            write(0x0a)
+        }
         write(byteArrayOf(0x1b, 0x61, 0x00, 0x1b, 0x45, 0x00, 0x1d, 0x21, 0x00, 0x0a, 0x0a, 0x0a))
     }.toByteArray()
+
+    private fun qrRaster(content: String): ByteArray {
+        val matrix = Encoder.encode(content, ErrorCorrectionLevel.M, mapOf(EncodeHintType.CHARACTER_SET to "UTF-8")).matrix
+        val modules = matrix.width + 8
+        val scale = 256 / modules
+        require(scale >= 3) { "Receipt QR exceeds supported size" }
+        val size = modules * scale
+        val stride = (size + 7) / 8
+        val data = ByteArray(stride * size)
+        for (y in 0 until size) for (x in 0 until size) {
+            val mx = x / scale - 4
+            val my = y / scale - 4
+            if (mx in 0 until matrix.width && my in 0 until matrix.height && matrix.get(mx, my).toInt() == 1) {
+                val offset = y * stride + x / 8
+                data[offset] = (data[offset].toInt() or (0x80 ushr (x % 8))).toByte()
+            }
+        }
+        return byteArrayOf(0x1d, 0x76, 0x30, 0x00, stride.toByte(), (stride shr 8).toByte(), size.toByte(), (size shr 8).toByte()) + data
+    }
 
     private fun textRaster(block: ReceiptBlock, paperWidth: Int): ByteArray {
         // ponytail: standard 384/576-dot ESC/POS widths; add printer profiles only for hardware needing different dot widths.

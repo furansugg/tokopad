@@ -414,7 +414,7 @@ class Store(context: Context) : java.io.Closeable {
         } }
         val payload = JSONObject().put("products", products).put("customers", customers).put("sales", sales)
             .put("settings", settingsJson(readSettings(db).copy(printerAddress = ""))).toString()
-        val result = JSONObject().put("version", 2).put("sha256", digest(payload)).put("payload", payload).toString()
+        val result = JSONObject().put("version", 3).put("sha256", digest(payload)).put("payload", payload).toString()
         requireBackupSize(result)
         result
     }
@@ -495,6 +495,7 @@ class Store(context: Context) : java.io.Closeable {
         private const val MAX_LINES = 200
         private const val MAX_STORAGE_BYTES = 28 * 1024 * 1024
         const val MAX_BACKUP_BYTES = 64 * 1024 * 1024
+        const val MAX_QR_CONTENT_BYTES = 200
         private val PAYMENTS = setOf("cash", "noncash")
 
         /** Throws IllegalArgumentException for malformed, incompatible, or inconsistent backups. */
@@ -507,7 +508,7 @@ class Store(context: Context) : java.io.Closeable {
             try {
                 boundedNesting(text)
                 val envelope = JSONObject(text)
-                val version = envelope.integer("version", 1, 2)
+                val version = envelope.integer("version", 1, 3)
                 val payload = envelope.string("payload")
                 val checksum = envelope.string("sha256")
                 require(checksum.matches(Regex("[0-9a-f]{64}")) && checksum == digest(payload)) { "Backup integrity check failed" }
@@ -616,6 +617,7 @@ class Store(context: Context) : java.io.Closeable {
             text(s.header, 2000, "Header", multiline = true)
             text(s.footer, 2000, "Footer", multiline = true)
             text(s.cashier, 200, "Cashier")
+            validateQrContent(s.qrContent)
             require(s.paperWidth == 58 || s.paperWidth == 80) { "Paper width must be 58 or 80" }
             require(s.printerAddress.isEmpty() || s.printerAddress.matches(Regex("[0-9A-Fa-f]{2}(:[0-9A-Fa-f]{2}){5}"))) { "Invalid printer address" }
             require(s.theme in setOf("system", "light", "dark")) { "Unsupported theme" }
@@ -630,6 +632,18 @@ class Store(context: Context) : java.io.Closeable {
                 require(dimension(16) in 1L..384L && dimension(20) in 1L..192L) { "Logo exceeds 384x192 pixels" }
                 requireNotNull(BitmapFactory.decodeByteArray(bytes, 0, bytes.size)) { "Logo must be a decodable PNG" }.recycle()
             }
+        }
+        private fun validateQrContent(value: String) {
+            text(value, MAX_QR_CONTENT_BYTES, "QR content")
+            require(value.indices.all { i ->
+                val c = value[i]
+                when {
+                    Character.isHighSurrogate(c) -> i + 1 < value.length && Character.isLowSurrogate(value[i + 1])
+                    Character.isLowSurrogate(c) -> i > 0 && Character.isHighSurrogate(value[i - 1])
+                    else -> true
+                }
+            }) { "QR content contains invalid Unicode" }
+            require(value.toByteArray(Charsets.UTF_8).size <= MAX_QR_CONTENT_BYTES) { "QR content exceeds $MAX_QR_CONTENT_BYTES UTF-8 bytes" }
         }
         private fun validateDestination(value: String) {
             require(value.length in 3..64 && value.any { it in '0'..'9' } &&
@@ -699,7 +713,7 @@ class Store(context: Context) : java.io.Closeable {
             .put("address", s.address).put("contact", s.contact).put("header", s.header).put("footer", s.footer)
             .put("showCustomer", s.showCustomer).put("cashier", s.cashier).put("showDiscount", s.showDiscount)
             .put("paperWidth", s.paperWidth).put("printerAddress", s.printerAddress)
-            .put("theme", s.theme).put("headerMode", s.headerMode).put("logo", s.logo)
+            .put("theme", s.theme).put("headerMode", s.headerMode).put("logo", s.logo).put("qrContent", s.qrContent)
         private fun saleJson(s: Sale): JSONObject {
             val lines = JSONArray()
             for (line in s.lines) lines.put(JSONObject().put("product", productJson(line.product)).put("quantity", line.quantity)
@@ -728,7 +742,8 @@ class Store(context: Context) : java.io.Closeable {
             cashier = o.string("cashier"), showDiscount = o.boolean("showDiscount"), paperWidth = o.integer("paperWidth", 58, 80).toInt(),
             printerAddress = o.string("printerAddress"),
             theme = o.optionalString("theme", "system"), headerMode = o.optionalString("headerMode", "name"), logo = o.optionalString("logo"),
-        )
+            qrContent = o.optionalString("qrContent"),
+        ).also { validateQrContent(it.qrContent) }
         private fun parseSale(o: JSONObject) = Sale(
             id = o.integer("id", 0, MAX_ID), number = o.string("number"), createdAt = o.integer("createdAt", 0, MAX_TIME), zoneId = o.string("zoneId"),
             lines = o.objects("lines", MAX_LINES).map { CartLine(parseProduct(it.getJSONObject("product")), it.integer("quantity", 1, MAX_QUANTITY),

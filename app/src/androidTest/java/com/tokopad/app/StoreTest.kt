@@ -400,13 +400,54 @@ class StoreTest {
         assertEquals(backup, store.exportBackup())
     }
 
+    @Test fun qrSettingsAndSaleSnapshotsSurviveReopenBackupAndRetry() {
+        val product = product()
+        val lines = listOf(CartLine(product))
+        val oldSettings = ShopSettings(qrContent = "é".repeat(100))
+        val newSettings = oldSettings.copy(qrContent = "https://example.com/pay")
+        store.saveSettings(oldSettings)
+        val request = UUID.randomUUID().toString()
+        val first = store.checkout(lines, null, 0, "cash", 100, request)
+        store.saveSettings(newSettings)
+        val second = store.checkout(lines, null, 0, "cash", 100)
+        assertEquals(first, store.checkout(lines, null, 0, "cash", 100, request))
+        store.close()
+        store = Store(context)
+        assertEquals(newSettings, store.settings())
+        assertEquals(oldSettings, store.sale(first.id).shop)
+        assertEquals(newSettings, store.sale(second.id).shop)
+        val backup = store.exportBackup()
+        assertEquals(3, JSONObject(backup).getInt("version"))
+        store.saveSettings(ShopSettings())
+        store.restoreBackup(backup)
+        assertEquals(newSettings, store.settings())
+        assertEquals(first, store.sale(first.id))
+        assertEquals(second, store.sale(second.id))
+        assertEquals(first, store.checkout(lines, null, 0, "cash", 100, request))
+        assertEquals(backup, store.exportBackup())
+    }
+
+    @Test fun invalidQrSettingsAndBackupSnapshotsAreRejectedWithoutChanges() {
+        val product = product()
+        val sale = store.checkout(listOf(CartLine(product)), null, 0, "cash", 100)
+        store.saveSettings(ShopSettings(qrContent = "valid"))
+        val original = store.exportBackup()
+        for (bad in listOf("x".repeat(201), "界".repeat(67), "bad\ncontent", "\uD800", "\uDC00", "\uD800x")) {
+            rejected { store.saveSettings(ShopSettings(qrContent = bad)) }
+            rejected { store.restoreBackup(editedBackup { it.getJSONObject("settings").put("qrContent", bad) }) }
+            rejected { store.restoreBackup(editedBackup { it.getJSONArray("sales").getJSONObject(0).getJSONObject("shop").put("qrContent", bad) }) }
+        }
+        assertEquals(original, store.exportBackup())
+        assertEquals(sale, store.sale(sale.id))
+    }
+
     @Test fun oldBackupsDefaultMissingOptionalFields() {
         val product = digital()
         val buyer = Customer(name = "Alice", meterNumber = "12345678").let { it.copy(id = store.saveCustomer(it)) }
         val sale = store.checkout(listOf(CartLine(product, destination = buyer.meterNumber, buyerName = buyer.name, kwh = "1")), buyer, 0, "cash", 100)
         val legacy = editedBackup { data ->
             data.getJSONArray("customers").getJSONObject(0).remove("meterNumber")
-            fun oldSettings(settings: JSONObject) { listOf("theme", "headerMode", "logo").forEach { settings.remove(it) } }
+            fun oldSettings(settings: JSONObject) { listOf("theme", "headerMode", "logo", "qrContent").forEach { settings.remove(it) } }
             oldSettings(data.getJSONObject("settings"))
             val oldSale = data.getJSONArray("sales").getJSONObject(0)
             oldSale.remove("checkoutSignature")
@@ -416,7 +457,11 @@ class StoreTest {
             val line = oldSale.getJSONArray("lines").getJSONObject(0)
             listOf("buyerName", "kwh", "customerId").forEach { line.remove(it) }
         }
-        store.restoreBackup(JSONObject(legacy).put("version", 1).toString())
+        for (version in 1..2) {
+            store.restoreBackup(JSONObject(legacy).put("version", version).toString())
+            assertEquals("", store.settings().qrContent)
+            assertEquals("", store.sale(sale.id).shop.qrContent)
+        }
         assertEquals("", store.customers().single().meterNumber)
         assertEquals(ShopSettings(), store.settings())
         val line = store.sale(sale.id).lines.single()
@@ -424,6 +469,7 @@ class StoreTest {
         assertEquals("", line.kwh)
         assertNull(line.customerId)
         val restored = store.sale(sale.id)
+        assertEquals("", restored.shop.qrContent)
         assertFalse(restored.isCredit)
         assertNull(restored.settlement)
         assertEquals(restored, store.checkout(listOf(line), store.customers().single(), 0, "cash", 100, sale.number))
@@ -468,7 +514,7 @@ class StoreTest {
                 rejected { store.restoreBackup(malformed) }
             }
         }
-        for (key in listOf("theme", "headerMode", "logo")) {
+        for (key in listOf("theme", "headerMode", "logo", "qrContent")) {
             for (bad in listOf<Any>(123, true, JSONObject.NULL)) {
                 rejected { store.restoreBackup(editedBackup { it.getJSONObject("settings").put(key, bad) }) }
                 rejected { store.restoreBackup(editedBackup { it.getJSONArray("sales").getJSONObject(0).getJSONObject("shop").put(key, bad) }) }

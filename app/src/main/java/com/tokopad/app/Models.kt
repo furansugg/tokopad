@@ -47,6 +47,7 @@ data class ShopSettings(
     val theme: String = "system",
     val headerMode: String = "name",
     val logo: String = "",
+    val qrContent: String = "",
 ) : java.io.Serializable
 
 data class Settlement(val amount: Long, val payment: String, val createdAt: Long, val requestId: String)

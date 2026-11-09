@@ -169,7 +169,7 @@ class CreditStoreTest {
         assertEquals(open, store.checkout(lines, buyer, 10, "cash", 40, checkoutRequest, true))
         rejected { store.checkout(lines, buyer, 10, "cash", 40, checkoutRequest, false) }
         val openBackup = store.exportBackup()
-        assertEquals(2, JSONObject(openBackup).getInt("version"))
+        assertEquals(3, JSONObject(openBackup).getInt("version"))
         store.restoreBackup(openBackup)
         store.close()
         store = Store(context)
@@ -198,6 +198,39 @@ class CreditStoreTest {
         assertNull(store.sale(open.id).customerId)
         store.restoreBackup(store.exportBackup())
         assertEquals(settled.copy(customerId = null), store.sale(open.id))
+    }
+
+    @Test fun legacyVersionTwoCreditRestorePreservesBalancesSettlementsAndRetries() {
+        val product = product()
+        val buyer = customer()
+        val lines = listOf(CartLine(product))
+        val openRequest = request()
+        val settledRequest = request()
+        val settlementRequest = request()
+        val open = store.checkout(lines, buyer, 0, "cash", 30, openRequest, true)
+        val settledSale = store.checkout(lines, buyer, 0, "cash", 40, settledRequest, true)
+        val settled = store.settleSale(settledSale.id, 60, "noncash", settlementRequest)
+        val legacy = editedBackup { data ->
+            data.getJSONObject("settings").remove("qrContent")
+            val sales = data.getJSONArray("sales")
+            for (i in 0 until sales.length()) sales.getJSONObject(i).getJSONObject("shop").remove("qrContent")
+        }
+        store.restoreBackup(JSONObject(legacy).put("version", 2).toString())
+        assertEquals(ShopSettings(), store.settings())
+        assertEquals(open, store.sale(open.id))
+        assertEquals(settled, store.sale(settled.id))
+        assertEquals(open, store.checkout(lines, buyer, 0, "cash", 30, openRequest, true))
+        assertEquals(settled, store.checkout(lines, buyer, 0, "cash", 40, settledRequest, true))
+        assertEquals(settled, store.settleSale(settled.id, 60, "noncash", settlementRequest))
+        assertEquals(listOf(open), store.outstandingForCustomer(buyer.id))
+        assertEquals(Dashboard(200, 2, 130, 70), store.dashboard(0, Long.MAX_VALUE))
+        assertEquals(18L, store.products().single().stock)
+        val upgraded = store.exportBackup()
+        assertEquals(3, JSONObject(upgraded).getInt("version"))
+        store.restoreBackup(upgraded)
+        assertEquals(open, store.sale(open.id))
+        assertEquals(settled, store.sale(settled.id))
+        assertEquals(upgraded, store.exportBackup())
     }
 
     @Test fun cancellationOfOpenAndSettledCreditRestoresStockAndPermitsDeletion() {

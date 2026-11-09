@@ -1,5 +1,13 @@
 package com.tokopad.app
 
+import com.google.zxing.BinaryBitmap
+import com.google.zxing.EncodeHintType
+import com.google.zxing.RGBLuminanceSource
+import com.google.zxing.ResultMetadataType
+import com.google.zxing.common.HybridBinarizer
+import com.google.zxing.qrcode.QRCodeReader
+import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
+import com.google.zxing.qrcode.encoder.Encoder
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertFalse
@@ -368,6 +376,52 @@ class ReceiptTest {
         assertTrue(wire.indexOf("3456 7890") < wire.indexOf("TOTAL"))
         val reset = byteArrayOf(0x1b, 0x61, 0x00, 0x1b, 0x45, 0x00, 0x1d, 0x21, 0x00, 0x0a, 0x0a, 0x0a)
         assertArrayEquals(reset, bytes.takeLast(reset.size).toByteArray())
+    }
+
+    @Test fun qrRasterRoundTripsSnapshotAfterFooterOnBothReceiptBranches() {
+        val payloads = listOf(" leading\n\ttrailing ", "Café 日本語 😀", "x".repeat(200), "😀".repeat(50))
+        val reset = byteArrayOf(0x1b, 0x61, 0x00, 0x1b, 0x45, 0x00, 0x1d, 0x21, 0x00, 0x0a, 0x0a, 0x0a)
+        val start = byteArrayOf(0x1b, 0x61, 0x01, 0x1b, 0x45, 0x00, 0x1d, 0x21, 0x00, 0x1d, 0x76, 0x30, 0x00)
+        for (kind in listOf(ProductKind.PHYSICAL, ProductKind.ELECTRICITY)) for (paper in listOf(58, 80)) {
+            val original = sale(listOf(CartLine(Product(name = "Item", price = 1, kind = kind))))
+            val disabled = Receipt.bytes(original, ShopSettings(paperWidth = paper, qrContent = "current setting"))
+            assertFalse(disabled.toString(Charsets.ISO_8859_1).contains("\u001dv0"))
+            for (payload in payloads) {
+                val transaction = original.copy(shop = original.shop.copy(qrContent = payload))
+                val settings = ShopSettings(paperWidth = paper, qrContent = "different current setting")
+                val bytes = Receipt.bytes(transaction, settings)
+                val prefix = disabled.copyOfRange(0, disabled.size - reset.size)
+                assertArrayEquals(prefix, bytes.copyOfRange(0, prefix.size))
+                assertTrue(prefix.toString(Charsets.US_ASCII).endsWith("Original footer\n"))
+                assertArrayEquals(start, bytes.copyOfRange(prefix.size, prefix.size + start.size))
+                assertArrayEquals(reset, bytes.takeLast(reset.size).toByteArray())
+                assertEquals(Receipt.text(original, settings), Receipt.text(transaction, settings))
+                val header = prefix.size + start.size - 4
+                val stride = (bytes[header + 4].toInt() and 255) or ((bytes[header + 5].toInt() and 255) shl 8)
+                val height = (bytes[header + 6].toInt() and 255) or ((bytes[header + 7].toInt() and 255) shl 8)
+                assertTrue(stride * 8 <= 256)
+                assertTrue(height <= 256)
+                val matrix = Encoder.encode(payload, ErrorCorrectionLevel.M, mapOf(EncodeHintType.CHARACTER_SET to "UTF-8")).matrix
+                val scale = height / (matrix.height + 8)
+                assertTrue(scale >= 3)
+                assertEquals((matrix.height + 8) * scale, height)
+                val pixels = IntArray(stride * 8 * height) { index ->
+                    val x = index % (stride * 8)
+                    val y = index / (stride * 8)
+                    val black = bytes[header + 8 + y * stride + x / 8].toInt() and (0x80 ushr (x % 8)) != 0
+                    val mx = x / scale - 4
+                    val my = y / scale - 4
+                    val expected = x < height && mx in 0 until matrix.width && my in 0 until matrix.height && matrix.get(mx, my).toInt() == 1
+                    assertEquals(expected, black)
+                    if (black) 0xff000000.toInt() else 0xffffffff.toInt()
+                }
+                val result = QRCodeReader().decode(BinaryBitmap(HybridBinarizer(RGBLuminanceSource(stride * 8, height, pixels))))
+                assertEquals(payload, result.text)
+                @Suppress("UNCHECKED_CAST")
+                val segments = result.resultMetadata[ResultMetadataType.BYTE_SEGMENTS] as List<ByteArray>
+                assertArrayEquals(payload.toByteArray(Charsets.UTF_8), segments.reduce { a, b -> a + b })
+            }
+        }
     }
 
     @Test fun bytesCannotInjectCommandsThroughAnyTextField() {
